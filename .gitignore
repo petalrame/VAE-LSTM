@@ -1,5 +1,6 @@
 # Add results directory
 
 # Add files that contain data from the data directory
-data/*.txt
-data/*.bin
+data/*.zip
+data/*.json
+data/*.tsv
