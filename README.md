@@ -3,23 +3,24 @@ Implementation of "A Deep Generative Framework for Paraphrase Generation"(**VAE-
 
 ## File Structure
 ```
-|- data
-| |- embeddings.txt
-| |- [RAW DATA]
-|- models
+|- data/
 | |- __init__.py
-| |- basic_model.py
-| |- model.py
-|- results
+| |- download.py --> Downloads dataset and splits it into train/test/eval
+| |- handler.py --> Makes TFRecords from the data
+|- models/
+| |- __init__.py
+| |- basic_model.py --> Base class for all models
+| |- model.py --> Class for our implementation
+|- results/
 | |- .gitkeep
-|- tests
+|- tests/
 | |- [VARIOUS TEST FILES]
-|- utils
+|- utils/
 | |- [HPSEARCH FILES]
-| |- [MISC. FILES] (e.g saving/loading etc.)
-|- main.py
+| |- [MISC. FILES] --> e.g saving/loading etc.
+|- main.py --> Training, inference, eval, TF app entry
 |- .gitignore
-|- README
+|- README.md
 ```
 For more on file structure see [3]
 
