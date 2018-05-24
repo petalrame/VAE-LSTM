@@ -17,6 +17,7 @@ Implementation of "A Deep Generative Framework for Paraphrase Generation"(**VAE-
 |- utils
 | |- [HPSEARCH FILES]
 | |- [MISC. FILES] (e.g saving/loading etc.)
+|- main.py
 |- .gitignore
 |- README
 ```

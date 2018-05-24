@@ -1,0 +1,6 @@
+# Add results directory
+results/
+
+# Add files that contain data from the data directory
+data/*.txt
+data/*.bin
