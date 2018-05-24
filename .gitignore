@@ -1,3 +1,6 @@
+# .vscode is annoying
+.vscode/*
+
 # Add results directory
 
 # Add files that contain data from the data directory
