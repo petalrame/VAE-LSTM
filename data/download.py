@@ -1,4 +1,4 @@
-""" Download and clean the raw dataset into Train/Test/Eval """
+""" Download data and pretrained vectors and split into Train/Val """
 import csv
 import glob
 import json
@@ -16,6 +16,7 @@ from tqdm import tqdm
 BASE_DIR = os.getcwd()
 QUORA = "http://qim.ec.quoracdn.net/quora_duplicate_questions.tsv"
 MSCOCO = "http://images.cocodataset.org/annotations/annotations_trainval2014.zip"
+FASTTEXT = "https://s3-us-west-1.amazonaws.com/fasttext-vectors/crawl-300d-2M.vec.zip"
 COCO_TRAIN = BASE_DIR + "/captions_train2014.json"
 COCO_VAL = BASE_DIR + "/captions_val2014.json"
 QUORA_RAW = BASE_DIR + "/quora_duplicate_questions.tsv"
@@ -93,13 +94,6 @@ def zip_handler(zipf):
 
     return
 
-def tokenize():
-    """Tokenize the text and get rid of any extraneous characters.
-    """
-    # TODO: Get rid of "/n" in the sentences
-    # TODO: Tokenize the sentence in the PTB style
-
-
 def handle_coco():
     """ Handles all parsing of the raw MSCOCO dataset.
     This includes getting keeping only 4 captions per image and writing the dataset into CSV
@@ -117,7 +111,8 @@ def handle_coco():
         with open(dataset) as f:
             data = json.load(f)
             for idx, anno in enumerate(data["annotations"]):
-                temp_dict[anno["image_id"]].append(anno["caption"])
+                sent = anno["caption"].rstrip()
+                temp_dict[anno["image_id"]].append(sent)
         
         # Shuffle the captions
         for img_id, captions in temp_dict.items():
@@ -136,13 +131,10 @@ def handle_coco():
                 writer.writerow([caption[0],caption[1]])
                 writer.writerow([caption[2],caption[3]])
             total += count
-            print("Found", count, "examples for", fname)
 
         # Update total/present the data split
         if dataset == COCO_TRAIN:
             split = count/total
-            print("Training has", count, "examples out of", total)
-            print("Training makes up", split, "percent of the data")
 
     return split
 
@@ -169,22 +161,29 @@ def clean_data():
             is_pair = int(row[5])
             if is_pair and (count <= train_split):
                 count += 1
-                traincsv.writerow([row[3],row[4]])
+                traincsv.writerow([row[3].rstrip(),row[4].rstrip()])
             elif is_pair:
                 count += 1
-                valcsv.writerow([row[3],row[4]])
+                valcsv.writerow([row[3].rstrip(),row[4].rstrip()])
 
     return
 
 
 if __name__ == "__main__":
-    """
-    for url in [QUORA, MSCOCO]:
+    for url in [QUORA,MSCOCO,FASTTEXT]:
         fp = download_file(url) #download
-    
-    # unzip MSCOCO
-    print("UNZIPPING FROM: ", fp)
-    zip_handler(fp)
-    """
+        if url == MSCOCO:
+            print("UNZIPPING FROM: ", fp)
+            zip_handler(fp)
+        elif url == FASTTEXT:
+            print("Unzipping Fasttext...")
+            with zipfile.ZipFile(fp, "r") as zip_ref:
+                zip_ref.extractall(BASE_DIR)
+            os.remove(fp)
+
     # clean all the data
     clean_data()
+
+    # clean up extra files
+    for file in [COCO_TRAIN,COCO_VAL,QUORA_RAW]:
+        os.remove(file)
