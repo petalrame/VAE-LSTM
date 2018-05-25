@@ -93,6 +93,13 @@ def zip_handler(zipf):
 
     return
 
+def tokenize():
+    """Tokenize the text and get rid of any extraneous characters.
+    """
+    # TODO: Get rid of "/n" in the sentences
+    # TODO: Tokenize the sentence in the PTB style
+
+
 def handle_coco():
     """ Handles all parsing of the raw MSCOCO dataset.
     This includes getting keeping only 4 captions per image and writing the dataset into CSV
@@ -103,7 +110,8 @@ def handle_coco():
     total = 0
     split = 0.0
 
-    for dataset in [COCO_TRAIN, COCO_VAL]:
+    print("Processing MSCOCO dataset...")
+    for dataset in [COCO_VAL, COCO_TRAIN]:
         temp_dict = defaultdict(list) # we store the data here for refinement
         # Read and parse the JSON
         with open(dataset) as f:
@@ -112,15 +120,8 @@ def handle_coco():
                 temp_dict[anno["image_id"]].append(anno["caption"])
         
         # Shuffle the captions
-        #for img_id, captions in temp_dict.items():
-            #shuffle(temp_dict[img_id])
-
-        # Update total/present the data split
-        total += idx
-        if dataset == COCO_VAL:
-            split = idx/total
-            print("Validation has", idx, "examples out of", total)
-            print("Validation makes up", split, "percent of the data")
+        for img_id, captions in temp_dict.items():
+            shuffle(temp_dict[img_id])
 
         # Write dataset to CSV file
         if dataset == COCO_TRAIN:
@@ -129,9 +130,19 @@ def handle_coco():
             fname = "val_data.csv"
         with open(fname, 'w') as csv_file:
             writer = csv.writer(csv_file)
+            count = 0
             for img_id, caption in temp_dict.items():
+                count += 2
                 writer.writerow([caption[0],caption[1]])
                 writer.writerow([caption[2],caption[3]])
+            total += count
+            print("Found", count, "examples for", fname)
+
+        # Update total/present the data split
+        if dataset == COCO_TRAIN:
+            split = count/total
+            print("Training has", count, "examples out of", total)
+            print("Training makes up", split, "percent of the data")
 
     return split
 
@@ -140,23 +151,28 @@ def clean_data():
     """
 
     coco_split = handle_coco()
-    val_split = int(coco_split*155000) # Splitting Quora dataset based on the split in MSCOCO(same %) 
 
+    print("Processing QUORA dataset...")
     with open(QUORA_RAW,'r') as quoraw, open('train_data.csv', 'a+') as traincsv, open('val_data.csv', 'a+') as valcsv:
         quoraw = csv.reader(quoraw, delimiter='\t')
         traincsv = csv.writer(traincsv)
         valcsv = csv.writer(valcsv)
 
+        # Make the train/val split
+        train_split = int(coco_split*149263) # no of examples for training dataset(Quora contains 149263 pair matches)
+
         # Weed out the nonmatching pairs and add it to the appropriate csv file
-        for row in quoraw:
-            if row[5] == 'is_duplicate':
+        count = 0
+        for idx, row in enumerate(quoraw):
+            if idx == 0:
                 continue
             is_pair = int(row[5])
-            if is_pair and val_split: 
-                val_split -= 1
-                valcsv.writerow([row[3],row[4]])
-            elif is_pair:
+            if is_pair and (count <= train_split):
+                count += 1
                 traincsv.writerow([row[3],row[4]])
+            elif is_pair:
+                count += 1
+                valcsv.writerow([row[3],row[4]])
 
     return
 
@@ -171,4 +187,4 @@ if __name__ == "__main__":
     zip_handler(fp)
     """
     # clean all the data
-    handle_coco()
+    clean_data()
