@@ -7,3 +7,5 @@
 data/*.zip
 data/*.json
 data/*.tsv
+data/*.csv
+data/*.vec
