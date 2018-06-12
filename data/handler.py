@@ -19,13 +19,12 @@ WORD_VECS = os.getcwd() + "crawl-300d-2M.vec"
 TRAIN_DATA = os.getcwd() + "train_data.csv"
 VAL_DATA = os.getcwd() + "val_data.csv"
 
-class GenPrep():
+class DataPrep():
     """ For reading data, processing for input, and writing to TFRecords
     """
     def __init__(self, tokenizer_fn):
         self.vocab = defaultdict(self.next_val) # maps tokens to ids. Autogenerate next id as needed
         self.reverse_vocab = {}
-        self.embeddings = {} # map IDs to vector embeddings
         self.token_counter = Counter() # counts token frequency
         # Add special characters to the vocab first
         self.vocab[0] = PAD
@@ -33,7 +32,6 @@ class GenPrep():
         self.vocab[2] = EOS
         self.next = 2 # after 2 is 3 and so on...
         self.tokenizer = tokenizer_fn
-        self.embedding_matrix = self.read_embeddings()
 
     def next_val(self):
         self.next += 1
@@ -86,6 +84,16 @@ class GenPrep():
 
         raise NotImplementedError
 
+    def ids_to_text(self, seq):
+        """ Maps a sequence of IDs to a string
+        Args:
+            seq: A sequence of IDs
+        Returns:
+            text: A text string that is supposed to be a sentence
+        """
+
+        raise NotImplementedError
+
     def read_embeddings(self, path=None):
         """ Reads and stores the FastText word embeddings from a file to a python dictionary with word as the key and vector as the value.
         Args:
@@ -94,10 +102,7 @@ class GenPrep():
             embedding_matrix: dict containing word/vector pair
         """
 
-        if path is None:
-            return {}
-
-        raise NotImplementedError
+        raise Exception('The read_embedding method should be overwritten')
 
     def read_data(self, path):
         """ Reads the training data from the specified path
@@ -108,13 +113,3 @@ class GenPrep():
         """
 
         raise Exception('The read_data method should be overwritten')
-
-    def ids_to_text(self, seq):
-        """ Maps a sequence of IDs to a string
-        Args:
-            seq: A sequence of IDs
-        Returns:
-            text: A text string that is supposed to be a sentence
-        """
-
-        raise NotImplementedError
