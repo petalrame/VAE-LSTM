@@ -21,7 +21,9 @@ class Dataset():
     """
 
     def __init__(self):
-        self.datasets = [TRAIN_DATA, VAL_DATA]
+        self.datasets = [TRAIN_DATA, VAL_DATA] # dataset locations
+        self.records = [TRAIN_RECORD, VAL_RECORD] # records for dataset
+        self.batch_size = 128 # TODO: Feed in TensorFlow application flags here and read batch size from that here
 
 
     def dataset_to_example(self):
@@ -38,10 +40,10 @@ class Dataset():
             record_path = None
 
             if ds is TRAIN_DATA:
-                record_path = TRAIN_RECORD
+                record_path = self.records[0]
                 vocab = Vocab(train=True)
             else:
-                record_path = VAL_RECORD
+                record_path = self.records[1]
                 vocab = Vocab(train=False)
 
             print("Saving dataset to TF example and initializing vocab")
@@ -132,3 +134,80 @@ class Dataset():
         )
 
         return {"source": sequence_parsed["sequence"], "target": sequence_parsed["targets"], "source_len": context_parsed["sequence_len"], "target_len": context_parsed["target_len"]}
+
+    def expand(self, x):
+        """ Since padded_batch does not work well with scalars, we expand the scalar to vector of length 1
+        Args:
+            x: An example with a scalar to be expanded to legnth 1 vector
+        Returns:
+            x: A vector of length 1
+        """
+
+        x["sequence_len"] = tf.expand_dims(tf.convert_to_tensor(x["sequence_len"]), 0)
+        x["target_len"] = tf.expand_dims(tf.convert_to_tensor(x["target_len"]), 0)
+
+        return x
+
+    def deflate(self, x):
+        """ Since padded_batch does not work well with scalars, we squeeze the vector of length 1 back to scalar
+        Args:
+            x: A vector of length 1
+        Returns:
+            x: A scalar
+        """
+
+        x["sequence_len"] = tf.squeeze(["sequence_len"])
+        x["target_len"] = tf.squeeze(["target_len"])
+
+        return x
+
+    def make_dataset(self, path=None, batch_size=128):
+        """ Make a Tensorflow dataset that is shuffled, batched and parsed
+        Args:
+            path: path of the record file to unpack and read
+            batch_size: Size of the batch for training
+        Returns:
+            A dataset that is shuffled and padded
+        """
+
+        if path is None:
+            raise Exception("You must specify a path!")
+
+        dataset = tf.data.TFRecordDataset([path]).map(self.parse, num_parallel_calls=5).shuffle(buffer_size=10000).map(self.expand)
+
+        dataset = dataset.padded_batch(batch_size, padded_shapes={
+            "sequence_len": 1,
+            "target_len": 1,
+            "sequence": tf.TensorShape([None]),
+            "targets": tf.TensorShape([None])
+        })
+
+        dataset = dataset.map(self.deflate)
+
+        return dataset
+
+    def prep_dataset_iter(self, batch_size=128):
+        """ Makes a dataset iterator with size batch size
+        Args:
+            batch_size: Size of the training batch
+        Returns:
+            next_element: The next element of the iterator
+            training_init_op: A reinitialized training operation after each epoch
+            validation_init_op: Antoher reinitialized operation for validation
+        """
+        train_ds = self.make_dataset(self.records[0], batch_size=self.batch_size)
+        val_ds = self.make_dataset(self.records[1], batch_size=self.batch_size)
+
+        # Make an interator object the shape of the dataset
+        iterator = tf.data.Iterator.from_structure(train_ds.output_types, train_ds.output_shapes)
+
+        next_element = iterator.get_next()
+        training_init_op = iterator.make_initializer(train_ds)
+        validation_init_op = iterator.make_initializer(val_ds)
+
+        return next_element, training_init_op, validation_init_op
+
+
+
+
+
