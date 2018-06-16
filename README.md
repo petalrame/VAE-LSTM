@@ -7,6 +7,7 @@ Implementation of "A Deep Generative Framework for Paraphrase Generation"(**VAE-
 | |- __init__.py
 | |- download.py --> Downloads dataset and splits it into train/test/eval
 | |- handler.py --> Makes TFRecords from the data
+| |- vocab.py --> Handles the vocab
 |- models/
 | |- __init__.py
 | |- basic_model.py --> Base class for all models

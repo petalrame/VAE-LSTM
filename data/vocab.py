@@ -3,7 +3,6 @@ from __future__ import absolute_import, division, print_function
 
 import io
 import os
-import pickle
 from collections import Counter, defaultdict
 
 import nltk
@@ -18,18 +17,17 @@ UNK = "<UNK>"
 
 # Path variables for reading in some of the data
 WORD_VECS = os.getcwd() + "crawl-300d-2M.vec"
-TRAIN_DATA = os.getcwd() + "train_data.csv"
-VAL_DATA = os.getcwd() + "val_data.csv"
 VOCAB = os.getcwd() + "vocab"
 
 class Vocab():
     """ For reading data, processing for input, and writing to TFRecords
     """
-    def __init__(self):
+    def __init__(self, train=False):
         self.embeddings, _, self.embedding_dim = self.read_embeddings(path=WORD_VECS) # map of ID to vecctor
         self.vocab = defaultdict(self.next_val) # maps tokens to ids. Autogenerate next id as needed
         self.reverse_vocab = {}
         self.token_counter = Counter() # counts token frequency
+        self.train = train # Mode for training
 
         # Add special characters to the vocab
         self.vocab[PAD] = 0
@@ -59,6 +57,10 @@ class Vocab():
 
         seq = self.map_to_ids(seq)
 
+        # Add START and EOS tokens
+        seq = [1] + seq
+        seq = seq + [2]
+
         return seq
 
     def tokenize(self, seq):
@@ -73,28 +75,27 @@ class Vocab():
 
         return nltk.word_tokenize(seq)
 
-    def map_to_ids(self, tok_seq, train=False):
+    def map_to_ids(self, tok_seq):
         """ Maps a list of tokens to their respective ids
         Args:
             tok_seq: A sequence of tokens(words or chars)
-            train: Determines whether to add the tokens to the vocab
         Returns:
             A list of IDs
         """
 
-        return [self.tok_to_id(token, train=train) for token in tok_seq]
+        return [self.tok_to_id(token) for token in tok_seq]
 
-    def tok_to_id(self, token, train=False, oov_words=True):
+    def tok_to_id(self, token, oov_words=True):
         """ Maps a token to it's corresponding ID. Or if in training mode, also adds new words to the vocab
         Args:
             token: A word
-            train: An option for training(updates the vocab). If train is set to False OOV words are mapped to UNK
+            train: An option for training(updates the vocab). If train is set to False OOV words are mapped to UNK or a vector is created for the OOV word
             oov_words: An option when building vocab to map words without pretrained embeddings to UNK
         Returns:
             An ID
         """
 
-        if train:
+        if self.train:
             if oov_words:
                 # If there is exists an embedding for token
                 if token in self.embeddings.keys():
@@ -165,33 +166,33 @@ class Vocab():
 
         print("Adding embeddings to the words in the vocab...")
 
-        embeddings = list()
+        embedding_matrix = list()
 
         # Initialize special tokens
-        embeddings.append(np.zeros(self.embedding_dim).tolist()) # Adding the PAD embedding
-        embeddings.append(np.random.randn(self.embedding_dim).tolist()) # Adding the START embedding
-        embeddings.append(np.random.randn(self.embedding_dim).tolist()) # Adding the EOS embedding
-        embeddings.append(np.random.randn(self.embedding_dim).tolist()) # Adding the UNK embedding
+        embedding_matrix.append(np.zeros(self.embedding_dim).tolist()) # Adding the PAD embedding
+        embedding_matrix.append(np.random.randn(self.embedding_dim).tolist()) # Adding the START embedding
+        embedding_matrix.append(np.random.randn(self.embedding_dim).tolist()) # Adding the EOS embedding
+        embedding_matrix.append(np.random.randn(self.embedding_dim).tolist()) # Adding the UNK embedding
 
         count = 0
-        for word in self.vocab.keys():
+        for word, id_ in enumerate(self.vocab.items()):
             if word in [PAD, UNK, START, EOS]:
                 continue
 
             if word in self.embeddings.keys():
                 # import the vector from the data dictionary
-                embeddings.append(self.embeddings[word])
+                embedding_matrix[id_] = self.embeddings[word]
             else:
                 count += 1
                 if oov_embeddings:
-                    embeddings.append(self.generate_embedding(word))
+                    embedding_matrix.append(self.generate_embedding(word))
 
         print("There were %d words without pretrained vectors" % count)
 
         # Convert to numpy array
-        embeddings = np.array([np.array(i) for i in embeddings])
+        embedding_matrix = np.array([np.array(i) for i in embedding_matrix])
 
-        return embeddings
+        return embedding_matrix
 
     def read_embeddings(self, path):
         """ Reads word embeddings from file that are saved in the FastText format
@@ -257,6 +258,8 @@ class Vocab():
 
         if path is None:
             raise Exception("Error: A path must be specified!")
+
+        print("Loading vocab at:", path)
 
         with open(path, 'r') as vocab_f:
             for i, line in enumerate(vocab_f):
