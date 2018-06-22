@@ -8,57 +8,64 @@ import io
 import csv
 import numpy as np
 import tensorflow as tf
-from vocab import Vocab
 
-# Path variables for reading in some of the data
-TRAIN_DATA = os.getcwd() + "train_data.csv"
-VAL_DATA = os.getcwd() + "val_data.csv"
-TRAIN_RECORD = os.getcwd() + "train.tfrecord"
-VAL_RECORD = os.getcwd() + "val.tfrecord"
-
-class Dataset():
+class Dataset(object):
     """ For reading data, processing for input, and writing to TFRecords
     """
 
-    def __init__(self):
-        self.datasets = [TRAIN_DATA, VAL_DATA] # dataset locations
-        self.records = [TRAIN_RECORD, VAL_RECORD] # records for dataset
-        self.batch_size = 128 # TODO: Feed in TensorFlow application flags here and read batch size from that here
+    def __init__(self, vocab):
+        self.vocab = vocab
 
-
-    def dataset_to_example(self):
+    def dataset_to_example(self, data_dir):
         """ Writes the dataset examples to TFRecords using the vocab to convert sequences of tokens to IDs
-        Writes:
-            train, val = TFRecords for the train and val sets
+        Args:
+            data_dir: Path to the directory containing the data(used to load training data and write to TFRecords)
+        Returns:
+            records: A list of record file paths that have been written
         """
 
-        # Read the dataset
-        for ds in self.datasets:
+        if not os.path.isdir(data_dir):
+            raise Exception('ERROR: Path to directory does not exist or is not a directory')
+            sys.exit(1)
+
+        # find the data files
+        datasets = glob.glob(os.path.join(data_dir,"*_data.csv"))
+        assert len(datasets) == 2, ("ERROR: There were more than two files found")
+
+        records = [os.path.join(data_dir, "train.tfrecord"), os.path.join(data_dir, "val.tfrecord")]
+
+        # Read a dataset
+        for ds in datasets:
             print("Making examples for:", ds)
 
             data = self.read_data(ds)
             record_path = None
 
-            if ds is TRAIN_DATA:
-                record_path = self.records[0]
-                vocab = Vocab(train=True)
-            else:
-                record_path = self.records[1]
-                vocab = Vocab(train=False)
+            # we only update the vocab if train is set to true
+            if "train_" in ds:
+                record_path = records[0]
+                self.vocab.train = True
+                print("Saving train set to TF Record format and initializing vocab")
+            elif "val_" in ds:
+                record_path = records[1]
+                self.vocab.train = False
+                print("Saving validation set to TF Record format")
 
-            print("Saving dataset to TF example and initializing vocab")
-
+            # prepare raw text and write example to file
             with open(record_path,'w') as fp:
                 writer = tf.python_io.TFRecordWriter(fp.name)
                 for raw_ex in data:
-                    prepped_ex = list(map(vocab.prep_seq, raw_ex))
+                    prepped_ex = list(map(self.vocab.prep_seq, raw_ex))
                     ex = self.make_example(sequence=prepped_ex[0], target=prepped_ex[1])
                     writer.write(ex.SerializeToString())
 
+            # we save the vocab to a location
             if ds is TRAIN_DATA:
-                vocab.save_vocab()
+                self.vocab.save_vocab()
 
             print("Finished making TFRecords for %s" % ds)
+
+        return records
 
 
 
@@ -155,13 +162,13 @@ class Dataset():
         Returns:
             x: A scalar
         """
-
+        # Scalars to deflate go here
         x["sequence_len"] = tf.squeeze(["sequence_len"])
         x["target_len"] = tf.squeeze(["target_len"])
 
         return x
 
-    def make_dataset(self, path=None, batch_size=128):
+    def make_dataset(self, path, batch_size=128):
         """ Make a Tensorflow dataset that is shuffled, batched and parsed
         Args:
             path: path of the record file to unpack and read
@@ -170,8 +177,9 @@ class Dataset():
             A dataset that is shuffled and padded
         """
 
-        if path is None:
-            raise Exception("You must specify a path!")
+        if not os.path.isfile(path):
+            raise Exception('ERROR: Path to directory does not exist or is not a directory')
+            sys.exit(1)
 
         dataset = tf.data.TFRecordDataset([path]).map(self.parse, num_parallel_calls=5).shuffle(buffer_size=10000).map(self.expand)
 
@@ -186,7 +194,7 @@ class Dataset():
 
         return dataset
 
-    def prep_dataset_iter(self, batch_size=128):
+    def prep_dataset_iter(self, batch_size):
         """ Makes a dataset iterator with size batch size
         Args:
             batch_size: Size of the training batch
@@ -195,8 +203,8 @@ class Dataset():
             training_init_op: A reinitialized training operation after each epoch
             validation_init_op: Antoher reinitialized operation for validation
         """
-        train_ds = self.make_dataset(self.records[0], batch_size=self.batch_size)
-        val_ds = self.make_dataset(self.records[1], batch_size=self.batch_size)
+        train_ds = self.make_dataset(self.records[0], batch_size=batch_size)
+        val_ds = self.make_dataset(self.records[1], batch_size=batch_size)
 
         # Make an interator object the shape of the dataset
         iterator = tf.data.Iterator.from_structure(train_ds.output_types, train_ds.output_shapes)

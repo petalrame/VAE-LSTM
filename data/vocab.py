@@ -19,15 +19,24 @@ UNK = "<UNK>"
 WORD_VECS = os.getcwd() + "crawl-300d-2M.vec"
 VOCAB = os.getcwd() + "vocab"
 
-class Vocab():
+class Vocab(object):
     """ For reading data, processing for input, and writing to TFRecords
     """
-    def __init__(self, train=False):
-        self.embeddings, _, self.embedding_dim = self.read_embeddings(path=WORD_VECS) # map of ID to vecctor
+    def __init__(self, train=False, vocab_path=VOCAB, vec_path=None):
+        """ Creates a vocab from training data and/or pretrained word vectors
+        Args:
+            train: Allows the vocabulary to be updated(for training hence the name)
+            vocab_path: Path to save/load the vocab file
+            vec_path: Path to pretrained embeddings
+        """
+        if vec_path is not None:
+            self.embeddings, _, self.embedding_dim = self.read_embeddings(path=vec_path) # map of ID to vector
         self.vocab = defaultdict(self.next_val) # maps tokens to ids. Autogenerate next id as needed
         self.reverse_vocab = {}
         self.token_counter = Counter() # counts token frequency
         self.train = train # Mode for training
+        self.vocab_path = vocab_path
+        self.vec_path = vec_path
 
         # Add special characters to the vocab
         self.vocab[PAD] = 0
@@ -37,8 +46,8 @@ class Vocab():
         self.next = 3 # after 2 is 3 and so on...
 
         # Reads created vocab from file if it exists
-        if os.path.isfile(VOCAB):
-            self.load_vocab(VOCAB)
+        if os.path.isfile(self.vocab_path):
+            self.load_vocab(self.vocab_path)
 
 
     def next_val(self):
@@ -144,24 +153,18 @@ class Vocab():
         
         return string
 
-
-
-    def create_embedding_matrix(self, path=None, all_embeddings=True, oov_embeddings=False):
+    def create_embedding_matrix(self, all_embeddings=False, oov_embeddings=False):
         """ Reads the FastText word embeddings from a file, adds new embeddings to vocab, and fills in any word embeddings
         Args:
-            path: path to the .vec file
             all_embeddings: An option to add all pretrained vectors to vocab. This will cause the model to be slower to train
             oov_embeddings: An option to generate embeddings for an OOV word
         Returns:
             embeddings: A numpy array of vectors
         """
 
-        if path is None:
-            raise Exception('You must specify a path to the pretrained embeddings...')
-
         if all_embeddings:
-            for word in self.embeddings:
-                self.vocab[word[0]] # add the token to the vocab
+            for word in self.embeddings.keys():
+                self.vocab[word] # add the token to the vocab if it doesn't already exist
 
 
         print("Adding embeddings to the words in the vocab...")
@@ -170,9 +173,9 @@ class Vocab():
 
         # Initialize special tokens
         embedding_matrix.append(np.zeros(self.embedding_dim).tolist()) # Adding the PAD embedding
-        embedding_matrix.append(np.random.randn(self.embedding_dim).tolist()) # Adding the START embedding
-        embedding_matrix.append(np.random.randn(self.embedding_dim).tolist()) # Adding the EOS embedding
-        embedding_matrix.append(np.random.randn(self.embedding_dim).tolist()) # Adding the UNK embedding
+        embedding_matrix.append(np.random.uniform(self.embedding_dim).tolist()) # Adding the START embedding
+        embedding_matrix.append(np.random.uniform(self.embedding_dim).tolist()) # Adding the EOS embedding
+        embedding_matrix.append(np.random.uniform(self.embedding_dim).tolist()) # Adding the UNK embedding
 
         count = 0
         for word, id_ in enumerate(self.vocab.items()):
@@ -185,7 +188,7 @@ class Vocab():
             else:
                 count += 1
                 if oov_embeddings:
-                    embedding_matrix.append(self.generate_embedding(word))
+                    embedding_matrix.append(self.generate_embedding(word, self.vec_path))
 
         print("There were %d words without pretrained vectors" % count)
 
@@ -204,28 +207,38 @@ class Vocab():
             dim: The dimension of the word embedding
         """
 
+        if not os.path.isfile(path):
+            raise Exception('ERROR! Filepath is not a file')
+            sys.exit(1)
+
         print("Reading embeddings from:", path)
 
         fin = io.open(path, 'r', encoding='utf-8', newline='\n', errors='ignore')
         length, dim = map(int, fin.readline().split())
 
-        data = {}
+        embeddings = {}
         for line in fin:
             tokens = line.rstrip().split(' ')
-            data[tokens[0]] = map(float, tokens[1:])
+            embeddings[tokens[0]] = map(float, tokens[1:])
 
-        return data, length, dim
+        return embeddings, length, dim
 
-    def generate_embedding(self, word):
+    @staticmethod
+    def generate_embedding(self, word, path):
         """ Generates an embedding for an OOV word with FastText Pretrained model
         Args:
             word: The word to generate an embedding for
+            path: Path to pretrained word vectors
         Returns:
             vector: An 300 dimensional vector is returned
         """
 
+        if not os.path.isfile(path):
+            raise Exception('ERROR! A proper filepath must be specified to read embeddings')
+            sys.exit(1)
+
         # Load the fattext format
-        model = ft.load_fasttext_format(WORD_VECS)
+        model = ft.load_fasttext_format(path)
 
         result = model.similar_by_word(word=word, topn=2)
 
@@ -252,19 +265,22 @@ class Vocab():
 
         return
 
-    def load_vocab(self, path=None):
+    def load_vocab(self, path):
         """ Loads the vocab file from the specified path
+        Args:
+            path: Filepath to the existing vocab
         """
 
-        if path is None:
-            raise Exception("Error: A path must be specified!")
+        if not os.path.isfile(path):
+            raise Exception("Error: A proper filepath must be specified!")
+            sys.exit(1)
 
         print("Loading vocab at:", path)
 
         with open(path, 'r') as vocab_f:
             for i, line in enumerate(vocab_f):
                 # skip rereading special chars
-                if i < 3:
+                if i <= 3:
                     continue
                 pieces = line.split()
                 if len(pieces) != 2:
@@ -276,6 +292,7 @@ class Vocab():
                 self.vocab[word]
                 if self.vocab[word] != int(pieces[1]):
                     raise Exception("The read word in the vocab does not match the ID it was given in the vocab file. Please check the vocab file.")
+                    sys.exit(1)
                 
         return
 
