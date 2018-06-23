@@ -1,11 +1,14 @@
 # .vscode is annoying
 .vscode/*
 
-# Add results directory
+# Exclude any data
+data/external/*
+data/interim/*
+data/processed/*
+data/raw/*
 
-# Add files that contain data from the data directory
-data/*.zip
-data/*.json
-data/*.tsv
-data/*.csv
-data/*.vec
+# Don't exclude the READMEs for the data folder
+!data/*/README.md
+
+# Don't exclude .gitkeep
+!.gitkeep

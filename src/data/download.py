@@ -13,6 +13,7 @@ from random import shuffle
 import requests
 from tqdm import tqdm
 
+# put your data here
 BASE_DIR = os.getcwd()
 QUORA = "http://qim.ec.quoracdn.net/quora_duplicate_questions.tsv"
 MSCOCO = "http://images.cocodataset.org/annotations/annotations_trainval2014.zip"
