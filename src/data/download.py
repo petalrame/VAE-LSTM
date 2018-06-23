@@ -4,6 +4,7 @@ import glob
 import json
 import math
 import os
+import sys
 import re
 import shutil
 import zipfile
@@ -14,44 +15,55 @@ import requests
 from tqdm import tqdm
 
 # put your data here
-BASE_DIR = os.getcwd()
+WORKING_DIR = os.path.abspath(os.path.dirname(__file__)) # path to file
+BASE_DIR = os.path.abspath(os.path.join(WORKING_DIR, "../../data"))
+RAW_DIR = os.path.join(BASE_DIR, "raw")
+EXTERNAL_DIR = os.path.join(BASE_DIR, "external") # holds external data(pretrained embeddings)
+INTERIM_DIR = os.path.join(BASE_DIR, "interim") # hold data before tf processing is done
+
+# Put dataset URLs and filenames here
 QUORA = "http://qim.ec.quoracdn.net/quora_duplicate_questions.tsv"
 MSCOCO = "http://images.cocodataset.org/annotations/annotations_trainval2014.zip"
 FASTTEXT = "https://s3-us-west-1.amazonaws.com/fasttext-vectors/crawl-300d-2M.vec.zip"
-COCO_TRAIN = BASE_DIR + "/captions_train2014.json"
-COCO_VAL = BASE_DIR + "/captions_val2014.json"
-QUORA_RAW = BASE_DIR + "/quora_duplicate_questions.tsv"
+COCO_TRAIN = os.path.join(RAW_DIR, "captions_train2014.json") 
+COCO_VAL = os.path.join(RAW_DIR, "captions_val2014.json")
+QUORA_RAW = os.path.join(RAW_DIR, "quora_duplicate_questions.tsv")
 
-def download_file(url):
+# Name of intermediary files
+TRAIN_DATA = os.path.join(INTERIM_DIR, "train_data.csv")
+VAL_DATA = os.path.join(INTERIM_DIR, "val_data.csv")
+
+def download_file(url, data_dir):
     """ General purpose function to download a file to working dir.
     Args:
         url: URL of the resource to download
+        data_dir: Directory to save the file to
     Returns:
         file_path: The path where the file was downloaded
     """
     
     # No existing file, let's download this file
     print("Downloading file located at:", url)
+
+    if not os.path.isdir(data_dir):
+        raise Exception("Path was None or is not a directory")
+    else:
+        file_path = data_dir
+        print("Saving file to:", data_dir)
     
     # Make request for file and get content length for tqdm
     response = requests.get(url, stream=True)
     total_size = int(response.headers.get('content-length', 0))
     wrote = 0
 
-    # Use content disposition to fetch filename
-    if 'Content-Disposition' in response.headers:
-        d = response.headers.get('Content-Disposition')
-        fname = re.findall("filename=(.+)", d)
-        file_path = os.getcwd()+"/"+fname
-    # Use splitting to find the filename
-    elif url.find('/'):
+    # Find name of the file
+    if url.find('/'):
         fname = url.rsplit('/',1)[1]
-        file_path = os.getcwd()+"/"+fname
-    print("Saving download to:", file_path)
+        file_path = os.path.join(file_path, fname)
 
     # Check to see if we have already downloaded to this location
     if os.path.exists(file_path):
-        print("Actually, " + file_path + ", already exists. Skipping...")
+        print(file_path, "already exists. Skipping...")
         return file_path
 
     # Show progress of download and write to file
@@ -67,27 +79,28 @@ def download_file(url):
 
     return file_path
 
-def zip_handler(zipf):
+def zip_handler(zipf, path):
     """ Handle the unzipping, moving and deleting of a specific dataset.
     NOTE: This function heavily depends on the dataset being handled and should be changed from project to project!
     Args:
         zipf: A zip file to unpack and process
+        path: Path to extract to
     """
 
     # Unzip the file
     with zipfile.ZipFile(zipf, "r") as zip_ref:
-        zip_ref.extractall(BASE_DIR)
+        zip_ref.extractall(RAW_DIR)
 
     # For the MSCOCO dataset(not needed for Quora)
-    del_dir = BASE_DIR+"/annotations"
+    del_dir = RAW_DIR+"/annotations"
 
     # Find files to keep
     keep_files = glob.glob(os.path.join(del_dir,'captions_*.json'))
     print("Keeping the following files:", keep_files)
 
-    # Move the files to keepinto the working dir
+    # Move the files to keep into the working dir
     for file in keep_files:
-        shutil.move(file, BASE_DIR)
+        shutil.move(file, RAW_DIR)
 
     # Cleanup directory and zip file
     shutil.rmtree(del_dir)
@@ -121,9 +134,9 @@ def handle_coco():
 
         # Write dataset to CSV file
         if dataset == COCO_TRAIN:
-            fname = "train_data.csv"
+            fname = TRAIN_DATA
         elif dataset == COCO_VAL:
-            fname = "val_data.csv"
+            fname = VAL_DATA
         with open(fname, 'w') as csv_file:
             writer = csv.writer(csv_file)
             count = 0
@@ -143,10 +156,11 @@ def clean_data():
     """ Prepares the Quora and COCO datasets for readibility and processing
     """
 
+    # process coco dataset
     coco_split = handle_coco()
 
     print("Processing QUORA dataset...")
-    with open(QUORA_RAW,'r') as quoraw, open('train_data.csv', 'a+') as traincsv, open('val_data.csv', 'a+') as valcsv:
+    with open(QUORA_RAW,'r') as quoraw, open(TRAIN_DATA, 'a+') as traincsv, open(VAL_DATA, 'a+') as valcsv:
         quoraw = csv.reader(quoraw, delimiter='\t')
         traincsv = csv.writer(traincsv)
         valcsv = csv.writer(valcsv)
@@ -171,16 +185,20 @@ def clean_data():
 
 
 if __name__ == "__main__":
-    for url in [QUORA,MSCOCO,FASTTEXT]:
-        fp = download_file(url) #download
+    print(RAW_DIR)
+    # Download and unzip datasets
+    for url in [QUORA,MSCOCO]:
+        fp = download_file(url, RAW_DIR)
         if url == MSCOCO:
             print("UNZIPPING FROM: ", fp)
-            zip_handler(fp)
-        elif url == FASTTEXT:
-            print("Unzipping Fasttext...")
-            with zipfile.ZipFile(fp, "r") as zip_ref:
-                zip_ref.extractall(BASE_DIR)
-            os.remove(fp)
+            zip_handler(fp, RAW_DIR)
+    
+    # Download and unzip fasttext
+    fp = download_file(FASTTEXT, EXTERNAL_DIR)
+    print("Unzipping Fasttext...")
+    with zipfile.ZipFile(fp, "r") as zip_ref:
+        zip_ref.extractall(EXTERNAL_DIR)
+    os.remove(fp)
 
     # clean all the data
     clean_data()

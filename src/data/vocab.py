@@ -15,14 +15,10 @@ START = "<START>"
 EOS = "<EOS>"
 UNK = "<UNK>"
 
-# Path variables for reading in some of the data
-WORD_VECS = os.getcwd() + "crawl-300d-2M.vec"
-VOCAB = os.getcwd() + "vocab"
-
 class Vocab(object):
     """ For reading data, processing for input, and writing to TFRecords
     """
-    def __init__(self, train=False, vocab_path=VOCAB, vec_path=None):
+    def __init__(self, train=False, vocab_path=None, vec_path=None):
         """ Creates a vocab from training data and/or pretrained word vectors
         Args:
             train: Allows the vocabulary to be updated(for training hence the name)
@@ -46,7 +42,7 @@ class Vocab(object):
         self.next = 3 # after 2 is 3 and so on...
 
         # Reads created vocab from file if it exists
-        if os.path.isfile(self.vocab_path):
+        if self.vocab_path is not None and os.path.isfile(self.vocab_path):
             self.load_vocab(self.vocab_path)
 
 
@@ -67,8 +63,8 @@ class Vocab(object):
         seq = self.map_to_ids(seq)
 
         # Add START and EOS tokens
-        seq = [1] + seq
-        seq = seq + [2]
+        seq = seq.insert(0, self.vocab[START])
+        seq = seq.append(self.vocab[EOS])
 
         return seq
 

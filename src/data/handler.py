@@ -30,7 +30,7 @@ class Dataset(object):
 
         # find the data files
         datasets = glob.glob(os.path.join(data_dir,"*_data.csv"))
-        assert len(datasets) == 2, ("ERROR: There were more than two files found")
+        assert len(datasets) == 2, ("ERROR: There were more than two files found") 
 
         records = [os.path.join(data_dir, "train.tfrecord"), os.path.join(data_dir, "val.tfrecord")]
 
