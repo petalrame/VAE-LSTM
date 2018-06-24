@@ -16,10 +16,11 @@ class Dataset(object):
     def __init__(self, vocab):
         self.vocab = vocab
 
-    def dataset_to_example(self, data_dir):
+    def dataset_to_example(self, data_dir, record_dir):
         """ Writes the dataset examples to TFRecords using the vocab to convert sequences of tokens to IDs
         Args:
-            data_dir: Path to the directory containing the data(used to load training data and write to TFRecords)
+            data_dir: Path to the directory containing the data
+            record_dir: Path to the directory containging the tfrecords
         Returns:
             records: A list of record file paths that have been written
         """
@@ -32,14 +33,13 @@ class Dataset(object):
         datasets = glob.glob(os.path.join(data_dir,"*_data.csv"))
         assert len(datasets) == 2, ("ERROR: There were more than two files found") 
 
-        records = [os.path.join(data_dir, "train.tfrecord"), os.path.join(data_dir, "val.tfrecord")]
+        records = [os.path.join(record_dir, "train.tfrecord"), os.path.join(record_dir, "val.tfrecord")]
 
         # Read a dataset
         for ds in datasets:
             print("Making examples for:", ds)
 
             data = self.read_data(ds)
-            record_path = None
 
             # we only update the vocab if train is set to true
             if "train_" in ds:
@@ -129,8 +129,8 @@ class Dataset(object):
         }
 
         sequence_features = {
-            "sequence": tf.FixedLenFeature([], dtype=tf.int64),
-            "targets": tf.FixedLenFeature([], dtype=tf.int64)
+            "sequence": tf.FixedLenSequenceFeature([], dtype=tf.int64),
+            "targets": tf.FixedLenSequenceFeature([], dtype=tf.int64)
         }
 
         #Parse the example and return dict of tensors
