@@ -14,7 +14,8 @@ from random import shuffle
 import requests
 from tqdm import tqdm
 
-from .vocab import Vocab
+from vocab import Vocab
+from handler import Dataset
 
 # put your data directories here
 WORKING_DIR = os.path.abspath(os.path.dirname(__file__)) # path to file
@@ -35,6 +36,8 @@ QUORA_RAW = os.path.join(RAW_DIR, "quora_duplicate_questions.tsv")
 # Name of intermediary files
 TRAIN_DATA = os.path.join(INTERIM_DIR, "train_data.csv")
 VAL_DATA = os.path.join(INTERIM_DIR, "val_data.csv")
+TRAIN_RECORD = os.path.join(PROCESSED_DIR, "train.tfrecord")
+VAL_RECORD = os.path.join(PROCESSED_DIR, "val.tfrecord")
 
 def download_file(url, data_dir):
     """ General purpose function to download a file to working dir.
@@ -128,7 +131,7 @@ def handle_coco(vocab):
         # Read and parse the JSON
         with open(dataset) as f:
             data = json.load(f)
-            for anno in enumerate(data["annotations"].itervalues()):
+            for _, anno in enumerate(data["annotations"]):
                 sent = anno["caption"].rstrip()
                 temp_dict[anno["image_id"]].append(sent)
         
@@ -208,26 +211,30 @@ def preprocess(vocab, max_keep=None):
     # save the vocabulary to the processed directory
     vocab.save_vocab(PROCESSED_DIR, max_keep=max_keep)
 
-    # TODO: Save to tfRecords
+    print("Reading datasets and making tfRecords")
+    handler = Dataset(vocab)
+    for data, record in [(TRAIN_DATA, TRAIN_RECORD), (VAL_DATA, VAL_RECORD)]:
+        handler.dataset_to_example(data, record)
 
     return
 
 
 if __name__ == "__main__":
-    print(RAW_DIR)
-    # Download and unzip datasets
-    for url in [QUORA,MSCOCO]:
-        fp = download_file(url, RAW_DIR)
-        if url == MSCOCO:
-            print("UNZIPPING FROM: ", fp)
-            zip_handler(fp, RAW_DIR)
-    
-    # Download and unzip fasttext
-    fp = download_file(FASTTEXT, EXTERNAL_DIR)
-    print("Unzipping Fasttext...")
-    with zipfile.ZipFile(fp, "r") as zip_ref:
-        zip_ref.extractall(EXTERNAL_DIR)
-    os.remove(fp)
+    debug = True
+    if not debug:
+        # Download and unzip datasets
+        for url in [QUORA,MSCOCO]:
+            fp = download_file(url, RAW_DIR)
+            if url == MSCOCO:
+                print("UNZIPPING FROM: ", fp)
+                zip_handler(fp, RAW_DIR)
+        
+        # Download and unzip fasttext
+        fp = download_file(FASTTEXT, EXTERNAL_DIR)
+        print("Unzipping Fasttext...")
+        with zipfile.ZipFile(fp, "r") as zip_ref:
+            zip_ref.extractall(EXTERNAL_DIR)
+        os.remove(fp)
 
     # clean all the data and build vocab
     vocab = Vocab(PROCESSED_DIR)

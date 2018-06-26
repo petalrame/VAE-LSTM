@@ -16,57 +16,55 @@ class Dataset(object):
     def __init__(self, vocab):
         self.vocab = vocab
 
-    def dataset_to_example(self, data_dir):
+    def dataset_to_example(self, data_path, record_path):
         """ Writes the dataset examples to TFRecords using the vocab to convert sequences of tokens to IDs
         Args:
-            data_dir: Path to the file containing the data
+            data_path: Path to the file containing the data
+            record_path: Path to save the tfRecord file(s) to
         Returns:
             records: A list of record file paths that have been written
         """
 
-        if not os.path.isdir(data_dir):
+        if not os.path.isfile(data_path):
             raise Exception('ERROR: Path to directory does not exist or is not a directory')
-            sys.exit(1)
 
-        # find the data files
-        datasets = glob.glob(os.path.join(data_dir,"*_data.csv"))
-        assert len(datasets) == 2, ("ERROR: There were more than two files found") 
-
-        records = [os.path.join(record_dir, "train.tfrecord"), os.path.join(record_dir, "val.tfrecord")]
+        print("Reading data located at:", data_path)
 
         # Read a dataset
-        for ds in datasets:
-            print("Making examples for:", ds)
+        data = self._read_csv_data(data_path)
 
-            data = self.read_data(ds)
+        print("Processing {0} and writing to: {1}".format(data_path, record_path))
 
-            # we only update the vocab if train is set to true
-            if "train_" in ds:
-                record_path = records[0]
-                print("Saving train set to TF Record format and initializing vocab")
-            elif "val_" in ds:
-                record_path = records[1]
-                print("Saving validation set to TF Record format")
+        # prepare raw text and write example to file
+        with open(record_path,'w') as fp:
+            writer = tf.python_io.TFRecordWriter(fp.name)
+            for raw_ex in data:
+                prepped_ex = list(map(self.vocab.prep_seq, raw_ex))
+                ex = self._make_example(sequence=prepped_ex[0], target=prepped_ex[1])
+                writer.write(ex.SerializeToString())
 
-            # prepare raw text and write example to file
-            with open(record_path,'w') as fp:
-                writer = tf.python_io.TFRecordWriter(fp.name)
-                for raw_ex in data:
-                    prepped_ex = list(map(self.vocab.prep_seq, raw_ex))
-                    ex = self.make_example(sequence=prepped_ex[0], target=prepped_ex[1])
-                    writer.write(ex.SerializeToString())
+        print("Finished making TFRecords for %s" % data_path)
 
-            # we save the vocab to a location
-            if ds is TRAIN_DATA:
-                self.vocab.save_vocab()
+        return
 
-            print("Finished making TFRecords for %s" % ds)
+    def _read_csv_data(self, path):
+        """ Reads the training/validation data from the specified path
+        Args:
+            path: The path of the training data
+        Returns:
+            A list of examples(e.g [[sent1, label1],[sent2, label2]]) where each example is a list of [sent, label]
+        """
 
-        return records
+        dataset = list()
 
+        with open(path, 'r') as f:
+            reader = csv.reader(f)
+            for row in reader:
+                dataset.append([row[0],row[1]])
 
+        return dataset
 
-    def make_example(self, sequence=list(), target=list()):
+    def _make_example(self, sequence=list(), target=list()):
         """ Makes an example for a list
         Args:
             sequence: A list of IDs that represents a sequence
@@ -88,27 +86,10 @@ class Dataset(object):
         fl_targets = ex.feature_lists.feature_list["targets"]
         
         for token, target in zip(sequence, target):
-            fl_sequence.feature_add().int64_list.value.append(token)
-            fl_targets.feature_add().int64_list.value.append(target)
+            fl_sequence.feature.add().int64_list.value.append(token)
+            fl_targets.feature.add().int64_list.value.append(target)
         
         return ex
-
-    def read_data(self, path):
-        """ Reads the training/validation data from the specified path
-        Args:
-            path: The path of the training data
-        Returns:
-            A list of examples(e.g [[sent1, label1],[sent2, label2]]) where each example is a list of [sent, label]
-        """
-
-        dataset = list()
-
-        with open(path, 'rb') as f:
-            reader = csv.reader(f)
-            for row in reader:
-                dataset.append([row[0],row[1]])
-
-        return dataset
 
     @staticmethod
     def parse(ex):
@@ -176,7 +157,6 @@ class Dataset(object):
 
         if not os.path.isfile(path):
             raise Exception('ERROR: Path to directory does not exist or is not a directory')
-            sys.exit(1)
 
         dataset = tf.data.TFRecordDataset([path]).map(self.parse, num_parallel_calls=5).shuffle(buffer_size=10000).map(self.expand)
 

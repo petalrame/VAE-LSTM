@@ -7,7 +7,6 @@ from collections import Counter, defaultdict
 
 import nltk
 import numpy as np
-from gensim.models import FastText as ft
 
 # Additions of special characters for sequence generation. You may add your own...
 PAD = "<PAD>"
@@ -68,8 +67,8 @@ class Vocab(object):
         seq = list(map(self._tok_to_id, seq))
 
         # Add START and EOS tokens
-        seq = seq.insert(0, self.vocab[START])
-        seq = seq.append(self.vocab[EOS])
+        seq.insert(0, self.vocab[START])
+        seq.append(self.vocab[EOS])
 
         return seq
 
@@ -162,12 +161,25 @@ class Vocab(object):
         if os.path.isfile(path):
             raise Exception('WARNING: There already exists a vocab file located at the specified path. If you want to create a new vocab delete/move the old one.')
 
-        # add all or the most frequent words to file
+        # add all or the most frequent words to file and update vocab object
         freq_tokens = self.token_counter.most_common(max_keep)
 
+        # rewrite self.vocab
+        self.vocab.clear()
+        self.vocab[PAD] = 0
+        self.vocab[START] = 1
+        self.vocab[EOS] = 2
+        self.vocab[UNK] = 3
+        self.next = 3
+        for token, _ in freq_tokens:
+            self.vocab[token]
+
         with open(path, 'w') as writer:
-            for word in freq_tokens:
-                writer.write(word + ' ' + str(self.vocab[word]) + '\n')
+            for word, id_ in self.vocab.items():
+                # skip adding special tokens
+                if id_ < 4:
+                    continue
+                writer.write(word + ' ' + str(id_) + '\n')
 
         print("Finished writing to vocab")
 
