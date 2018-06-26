@@ -16,11 +16,10 @@ class Dataset(object):
     def __init__(self, vocab):
         self.vocab = vocab
 
-    def dataset_to_example(self, data_dir, record_dir):
+    def dataset_to_example(self, data_dir):
         """ Writes the dataset examples to TFRecords using the vocab to convert sequences of tokens to IDs
         Args:
-            data_dir: Path to the directory containing the data
-            record_dir: Path to the directory containging the tfrecords
+            data_dir: Path to the file containing the data
         Returns:
             records: A list of record file paths that have been written
         """
@@ -44,11 +43,9 @@ class Dataset(object):
             # we only update the vocab if train is set to true
             if "train_" in ds:
                 record_path = records[0]
-                self.vocab.train = True
                 print("Saving train set to TF Record format and initializing vocab")
             elif "val_" in ds:
                 record_path = records[1]
-                self.vocab.train = False
                 print("Saving validation set to TF Record format")
 
             # prepare raw text and write example to file

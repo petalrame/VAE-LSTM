@@ -4,9 +4,9 @@ import glob
 import json
 import math
 import os
-import sys
 import re
 import shutil
+import sys
 import zipfile
 from collections import defaultdict
 from random import shuffle
@@ -14,12 +14,15 @@ from random import shuffle
 import requests
 from tqdm import tqdm
 
-# put your data here
+from .vocab import Vocab
+
+# put your data directories here
 WORKING_DIR = os.path.abspath(os.path.dirname(__file__)) # path to file
 BASE_DIR = os.path.abspath(os.path.join(WORKING_DIR, "../../data"))
 RAW_DIR = os.path.join(BASE_DIR, "raw")
 EXTERNAL_DIR = os.path.join(BASE_DIR, "external") # holds external data(pretrained embeddings)
 INTERIM_DIR = os.path.join(BASE_DIR, "interim") # hold data before tf processing is done
+PROCESSED_DIR = os.path.join(BASE_DIR, "processed")
 
 # Put dataset URLs and filenames here
 QUORA = "http://qim.ec.quoracdn.net/quora_duplicate_questions.tsv"
@@ -92,7 +95,7 @@ def zip_handler(zipf, path):
         zip_ref.extractall(RAW_DIR)
 
     # For the MSCOCO dataset(not needed for Quora)
-    del_dir = RAW_DIR+"/annotations"
+    del_dir = os.path.join(RAW_DIR, "annotations")
 
     # Find files to keep
     keep_files = glob.glob(os.path.join(del_dir,'captions_*.json'))
@@ -108,10 +111,11 @@ def zip_handler(zipf, path):
 
     return
 
-def handle_coco():
+def handle_coco(vocab):
     """ Handles all parsing of the raw MSCOCO dataset.
     This includes getting keeping only 4 captions per image and writing the dataset into CSV
-
+    Args:
+        vocab: vocab object to build vocab with
     Returns:
         idx/total: Split from validation to train data
     """
@@ -124,12 +128,12 @@ def handle_coco():
         # Read and parse the JSON
         with open(dataset) as f:
             data = json.load(f)
-            for idx, anno in enumerate(data["annotations"]):
+            for anno in enumerate(data["annotations"].itervalues()):
                 sent = anno["caption"].rstrip()
                 temp_dict[anno["image_id"]].append(sent)
         
         # Shuffle the captions
-        for img_id, captions in temp_dict.items():
+        for img_id in temp_dict:
             shuffle(temp_dict[img_id])
 
         # Write dataset to CSV file
@@ -142,8 +146,12 @@ def handle_coco():
             count = 0
             for img_id, caption in temp_dict.items():
                 count += 2
-                writer.writerow([caption[0],caption[1]])
-                writer.writerow([caption[2],caption[3]])
+                if dataset == COCO_TRAIN:
+                    # expand vocab
+                    for sent in [caption[0], caption[1], caption[2], caption[3]]:
+                        vocab.prep_train_seq(sent.rstrip())
+                writer.writerow([caption[0].rstrip(),caption[1].rstrip()])
+                writer.writerow([caption[2].rstrip(),caption[3].rstrip()])
             total += count
 
         # Update total/present the data split
@@ -152,12 +160,11 @@ def handle_coco():
 
     return split
 
-def clean_data():
-    """ Prepares the Quora and COCO datasets for readibility and processing
+def handle_quora(split, vocab):
+    """ Read and process the raw Quora dataset
+    Args:
+        split: The split for train/val
     """
-
-    # process coco dataset
-    coco_split = handle_coco()
 
     print("Processing QUORA dataset...")
     with open(QUORA_RAW,'r') as quoraw, open(TRAIN_DATA, 'a+') as traincsv, open(VAL_DATA, 'a+') as valcsv:
@@ -166,7 +173,7 @@ def clean_data():
         valcsv = csv.writer(valcsv)
 
         # Make the train/val split
-        train_split = int(coco_split*149263) # no of examples for training dataset(Quora contains 149263 pair matches)
+        train_split = int(split*149263) # no of examples for training dataset(Quora contains 149263 pair matches)
 
         # Weed out the nonmatching pairs and add it to the appropriate csv file
         count = 0
@@ -174,12 +181,34 @@ def clean_data():
             if idx == 0:
                 continue
             is_pair = int(row[5])
+            example = [row[3].rstrip(),row[4].rstrip()]
             if is_pair and (count <= train_split):
                 count += 1
-                traincsv.writerow([row[3].rstrip(),row[4].rstrip()])
+                # expand vocab
+                for sent in example:
+                    vocab.prep_train_seq(sent)
+                traincsv.writerow(example)
             elif is_pair:
                 count += 1
-                valcsv.writerow([row[3].rstrip(),row[4].rstrip()])
+                valcsv.writerow(example)
+
+def preprocess(vocab, max_keep=None):
+    """ Prepare datasets, build vocab and write to tfRecords
+    Args:
+        vocab: vocab object to build vocab
+        max_keep: The maximum number of words to keep. If None, it will write all words in the vocab dict to file.
+    """
+
+    # process coco dataset
+    coco_split = handle_coco(vocab)
+
+    # process quroa dataset
+    handle_quora(coco_split, vocab)
+
+    # save the vocabulary to the processed directory
+    vocab.save_vocab(PROCESSED_DIR, max_keep=max_keep)
+
+    # TODO: Save to tfRecords
 
     return
 
@@ -200,8 +229,9 @@ if __name__ == "__main__":
         zip_ref.extractall(EXTERNAL_DIR)
     os.remove(fp)
 
-    # clean all the data
-    clean_data()
+    # clean all the data and build vocab
+    vocab = Vocab(PROCESSED_DIR)
+    preprocess(vocab)
 
     # clean up extra files
     for file in [COCO_TRAIN,COCO_VAL,QUORA_RAW]:
