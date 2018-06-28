@@ -53,6 +53,7 @@ class Dataset(object):
             path: The path of the training data
         Returns:
             A list of examples(e.g [[sent1, label1],[sent2, label2]]) where each example is a list of [sent, label]
+            where sent and label is a text string
         """
 
         dataset = list()
@@ -64,32 +65,37 @@ class Dataset(object):
 
         return dataset
 
-    def _make_example(self, sequence=list(), target=list()):
-        """ Makes an example for a list
+    def _make_example(self, sequence, target):
+        """ Returns a SequenceExample for the given inputs and labels
         Args:
-            sequence: A list of IDs that represents a sequence
-            target: A target list of IDs for the model(also representing a sequence)
+            sequence: A list of input IDs.
+            target: A list of target IDs
         Returns:
-            ex: A TFExample of the example fed in
+            A tf.train.SequenceExample containing inputs and targets
         """
+        # Convert to feature
+        def _int64_feature(value):
+            return tf.train.Feature(int64_list=tf.train.Int64List(value=[value]))
 
-        ex = tf.train.SequenceExample()
+        # Convert list of IDs to int feature list
+        def _int64_feature_list(values):
+            return tf.train.FeatureList(feature=[_int64_feature(v) for v in values])
 
-        # Adding non-sequential features
-        sequence_len = len(sequence)
+        # calculate lengths
+        seq_len = len(sequence)
         target_len = len(target)
-        ex.context.feature["sequence_len"].int64_list.value.append(sequence_len)
-        ex.context.feature["target_len"].int64_list.value.append(target_len)
 
-        # Add feature lists for the two sequential features in the example
-        fl_sequence = ex.feature_lists.feature_list["sequence"]
-        fl_targets = ex.feature_lists.feature_list["targets"]
-        
-        for token, target in zip(sequence, target):
-            fl_sequence.feature.add().int64_list.value.append(token)
-            fl_targets.feature.add().int64_list.value.append(target)
-        
-        return ex
+        # create key/value pair for features
+        context_features = {
+            "sequence_len": _int64_feature(seq_len),
+            "target_len": _int64_feature(target_len),
+        }
+        feature_list = {
+            "sequence": _int64_feature_list(sequence),
+            "targets": _int64_feature_list(target),
+        }
+
+        return tf.train.SequenceExample(context=tf.train.Features(feature=context_features), feature_list=tf.train.FeatureLists(feature_list=feature_list))
 
     @staticmethod
     def parse(ex):
@@ -118,35 +124,9 @@ class Dataset(object):
             sequence_features=sequence_features
         )
 
-        return {"source": sequence_parsed["sequence"], "target": sequence_parsed["targets"], "source_len": context_parsed["sequence_len"], "target_len": context_parsed["target_len"]}
+        return {"sequence": sequence_parsed["sequence"], "targets": sequence_parsed["targets"], "sequence_len": context_parsed["sequence_len"], "target_len": context_parsed["target_len"]}
 
-    def expand(self, x):
-        """ Since padded_batch does not work well with scalars, we expand the scalar to vector of length 1
-        Args:
-            x: An example with a scalar to be expanded to legnth 1 vector
-        Returns:
-            x: A vector of length 1
-        """
-
-        x["sequence_len"] = tf.expand_dims(tf.convert_to_tensor(x["sequence_len"]), 0)
-        x["target_len"] = tf.expand_dims(tf.convert_to_tensor(x["target_len"]), 0)
-
-        return x
-
-    def deflate(self, x):
-        """ Since padded_batch does not work well with scalars, we squeeze the vector of length 1 back to scalar
-        Args:
-            x: A vector of length 1
-        Returns:
-            x: A scalar
-        """
-        # Scalars to deflate go here
-        x["sequence_len"] = tf.squeeze(["sequence_len"])
-        x["target_len"] = tf.squeeze(["target_len"])
-
-        return x
-
-    def make_dataset(self, path, batch_size=128):
+    def make_dataset(self, path, batch_size):
         """ Make a Tensorflow dataset that is shuffled, batched and parsed
         Args:
             path: path of the record file to unpack and read
@@ -158,39 +138,36 @@ class Dataset(object):
         if not os.path.isfile(path):
             raise Exception('ERROR: Path to directory does not exist or is not a directory')
 
-        dataset = tf.data.TFRecordDataset([path]).map(self.parse, num_parallel_calls=5).shuffle(buffer_size=10000).map(self.expand)
+        dataset = tf.data.TFRecordDataset([path]).map(self.parse, num_parallel_calls=5).shuffle(buffer_size=10000)
 
         dataset = dataset.padded_batch(batch_size, padded_shapes={
-            "sequence_len": 1,
-            "target_len": 1,
-            "sequence": tf.TensorShape([None]),
-            "targets": tf.TensorShape([None])
+            "sequence_len": [],
+            "target_len": [],
+            "sequence": [None],
+            "targets": [None]
         })
-
-        dataset = dataset.map(self.deflate)
 
         return dataset
 
-    def prep_dataset_iter(self, batch_size):
+    def prep_dataset_iter(self, path, batch_size):
         """ Makes a dataset iterator with size batch size
         Args:
+            path: path to the tfrecord file
             batch_size: Size of the training batch
         Returns:
+            iterator: The iterator for the dataset. To be initialized with iterator.initializer
             next_element: The next element of the iterator
-            training_init_op: A reinitialized training operation after each epoch
-            validation_init_op: Antoher reinitialized operation for validation
         """
-        train_ds = self.make_dataset(self.records[0], batch_size=batch_size)
-        val_ds = self.make_dataset(self.records[1], batch_size=batch_size)
+        if not os.path.isfile(path):
+            raise Exception("ERROR: Provided path is not a file")
+
+        ds = self.make_dataset(path, batch_size=batch_size)
 
         # Make an interator object the shape of the dataset
-        iterator = tf.data.Iterator.from_structure(train_ds.output_types, train_ds.output_shapes)
-
+        iterator = ds.make_initializable_iterator()
         next_element = iterator.get_next()
-        training_init_op = iterator.make_initializer(train_ds)
-        validation_init_op = iterator.make_initializer(val_ds)
 
-        return next_element, training_init_op, validation_init_op
+        return iterator, next_element
 
 
 

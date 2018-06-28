@@ -29,9 +29,9 @@ PROCESSED_DIR = os.path.join(BASE_DIR, "processed")
 QUORA = "http://qim.ec.quoracdn.net/quora_duplicate_questions.tsv"
 MSCOCO = "http://images.cocodataset.org/annotations/annotations_trainval2014.zip"
 FASTTEXT = "https://s3-us-west-1.amazonaws.com/fasttext-vectors/crawl-300d-2M.vec.zip"
-COCO_TRAIN = os.path.join(RAW_DIR, "captions_train2014.json") 
-COCO_VAL = os.path.join(RAW_DIR, "captions_val2014.json")
-QUORA_RAW = os.path.join(RAW_DIR, "quora_duplicate_questions.tsv")
+COCO_TRAIN = os.path.join(RAW_DIR,"captions_train2014.json") 
+COCO_VAL = os.path.join(RAW_DIR,"captions_val2014.json")
+QUORA_RAW = os.path.join(RAW_DIR,"quora_duplicate_questions.tsv")
 
 # Name of intermediary files
 TRAIN_DATA = os.path.join(INTERIM_DIR, "train_data.csv")
@@ -64,7 +64,7 @@ def download_file(url, data_dir):
 
     # Find name of the file
     if url.find('/'):
-        fname = url.rsplit('/',1)[1]
+        fname = url.rsplit('/', 1)[1]
         file_path = os.path.join(file_path, fname)
 
     # Check to see if we have already downloaded to this location
@@ -95,10 +95,10 @@ def zip_handler(zipf, path):
 
     # Unzip the file
     with zipfile.ZipFile(zipf, "r") as zip_ref:
-        zip_ref.extractall(RAW_DIR)
+        zip_ref.extractall(path)
 
     # For the MSCOCO dataset(not needed for Quora)
-    del_dir = os.path.join(RAW_DIR, "annotations")
+    del_dir = os.path.join(path, "annotations")
 
     # Find files to keep
     keep_files = glob.glob(os.path.join(del_dir,'captions_*.json'))
@@ -106,7 +106,7 @@ def zip_handler(zipf, path):
 
     # Move the files to keep into the working dir
     for file in keep_files:
-        shutil.move(file, RAW_DIR)
+        shutil.move(file, path)
 
     # Cleanup directory and zip file
     shutil.rmtree(del_dir)
@@ -129,8 +129,8 @@ def handle_coco(vocab):
     for dataset in [COCO_VAL, COCO_TRAIN]:
         temp_dict = defaultdict(list) # we store the data here for refinement
         # Read and parse the JSON
-        with open(dataset) as f:
-            data = json.load(f)
+        with open(dataset) as coco_file:
+            data = json.load(coco_file)
             for _, anno in enumerate(data["annotations"]):
                 sent = anno["caption"].rstrip()
                 temp_dict[anno["image_id"]].append(sent)
@@ -220,25 +220,23 @@ def preprocess(vocab, max_keep=None):
 
 
 if __name__ == "__main__":
-    debug = True
-    if not debug:
-        # Download and unzip datasets
-        for url in [QUORA,MSCOCO]:
-            fp = download_file(url, RAW_DIR)
-            if url == MSCOCO:
-                print("UNZIPPING FROM: ", fp)
-                zip_handler(fp, RAW_DIR)
-        
-        # Download and unzip fasttext
-        fp = download_file(FASTTEXT, EXTERNAL_DIR)
-        print("Unzipping Fasttext...")
-        with zipfile.ZipFile(fp, "r") as zip_ref:
-            zip_ref.extractall(EXTERNAL_DIR)
-        os.remove(fp)
+    # Download and unzip datasets
+    for url in [QUORA,MSCOCO]:
+        fp = download_file(url, RAW_DIR)
+        if url == MSCOCO:
+            print("UNZIPPING FROM: ", fp)
+            zip_handler(fp, RAW_DIR)
+    
+    # Download and unzip fasttext
+    fast_text = download_file(FASTTEXT, EXTERNAL_DIR)
+    print("Unzipping Fasttext...")
+    with zipfile.ZipFile(fast_text, "r") as zip_ref:
+        zip_ref.extractall(EXTERNAL_DIR)
+    os.remove(fast_text)
 
     # clean all the data and build vocab
-    vocab = Vocab(PROCESSED_DIR)
-    preprocess(vocab)
+    vocab_handler = Vocab(PROCESSED_DIR)
+    preprocess(vocab_handler)
 
     # clean up extra files
     for file in [COCO_TRAIN,COCO_VAL,QUORA_RAW]:

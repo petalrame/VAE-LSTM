@@ -35,7 +35,7 @@ class Vocab(object):
 
         # Reads created vocab from file if it exists
         if os.path.isfile(vocab_path):
-            self.load_vocab(self.vocab_path)
+            self.load_vocab(vocab_path)
 
 
     def _next_val(self):
@@ -130,7 +130,6 @@ class Vocab(object):
 
         if not os.path.isfile(path):
             raise Exception('ERROR! Filepath is not a file')
-            sys.exit(1)
 
         print("Reading embeddings from:", path)
 
@@ -197,7 +196,7 @@ class Vocab(object):
         print("Loading vocab at:", path)
 
         with open(path, 'r') as vocab_f:
-            for i, line in enumerate(vocab_f):
+            for line in vocab_f:
                 # check integrity of vocab file
                 pieces = line.split()
                 if len(pieces) != 2:
