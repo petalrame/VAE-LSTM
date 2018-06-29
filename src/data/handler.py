@@ -97,35 +97,6 @@ class Dataset(object):
 
         return tf.train.SequenceExample(context=tf.train.Features(feature=context_features), feature_list=tf.train.FeatureLists(feature_list=feature_list))
 
-    @staticmethod
-    def parse(ex):
-        """ Explain to TF how to go back from a serialized example to tensors
-        Args:
-            ex: An example
-        Returns:
-            A dictionary of tensors
-        """
-
-        # Define how to prase the example
-        context_features = {
-            "sequence_len": tf.FixedLenFeature([], dtype=tf.int64),
-            "target_len": tf.FixedLenFeature([], dtype=tf.int64)
-        }
-
-        sequence_features = {
-            "sequence": tf.FixedLenSequenceFeature([], dtype=tf.int64),
-            "targets": tf.FixedLenSequenceFeature([], dtype=tf.int64)
-        }
-
-        #Parse the example and return dict of tensors
-        context_parsed, sequence_parsed = tf.parse_single_sequence_example(
-            serialized=ex,
-            context_features=context_features,
-            sequence_features=sequence_features
-        )
-
-        return {"sequence": sequence_parsed["sequence"], "targets": sequence_parsed["targets"], "sequence_len": context_parsed["sequence_len"], "target_len": context_parsed["target_len"]}
-
     def make_dataset(self, path, batch_size):
         """ Make a Tensorflow dataset that is shuffled, batched and parsed
         Args:
@@ -138,7 +109,33 @@ class Dataset(object):
         if not os.path.isfile(path):
             raise Exception('ERROR: Path to directory does not exist or is not a directory')
 
-        dataset = tf.data.TFRecordDataset([path]).map(self.parse, num_parallel_calls=5).shuffle(buffer_size=10000)
+        def _parse(ex):
+            """ Explain to TF how to go back from a serialized example to tensors
+            Args:
+                ex: An example
+            Returns:
+                A dictionary of tensors
+            """
+            # Define how to parse the example
+            context_features = {
+                "sequence_len": tf.FixedLenFeature([], dtype=tf.int64),
+                "target_len": tf.FixedLenFeature([], dtype=tf.int64)
+            }
+            sequence_features = {
+                "sequence": tf.FixedLenSequenceFeature([], dtype=tf.int64),
+                "targets": tf.FixedLenSequenceFeature([], dtype=tf.int64)
+            }
+            #Parse the example and return dict of tensors
+            context_parsed, sequence_parsed = tf.parse_single_sequence_example(
+                serialized=ex,
+                context_features=context_features,
+                sequence_features=sequence_features
+            )
+
+            return {"sequence": sequence_parsed["sequence"], "targets": sequence_parsed["targets"],
+                    "sequence_len": context_parsed["sequence_len"], "target_len": context_parsed["target_len"]}
+
+        dataset = tf.data.TFRecordDataset([path]).map(_parse, num_parallel_calls=5).shuffle(buffer_size=10000) # TODO: Find out what parse should be returning
 
         dataset = dataset.padded_batch(batch_size, padded_shapes={
             "sequence_len": [],
