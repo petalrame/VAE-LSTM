@@ -95,7 +95,7 @@ class Dataset(object):
             "targets": _int64_feature_list(target),
         }
 
-        return tf.train.SequenceExample(context=tf.train.Features(feature=context_features), feature_list=tf.train.FeatureLists(feature_list=feature_list))
+        return tf.train.SequenceExample(context=tf.train.Features(feature=context_features), feature_lists=tf.train.FeatureLists(feature_list=feature_list))
 
     def make_dataset(self, path, batch_size):
         """ Make a Tensorflow dataset that is shuffled, batched and parsed
@@ -132,17 +132,17 @@ class Dataset(object):
                 sequence_features=sequence_features
             )
 
-            return {"sequence": sequence_parsed["sequence"], "targets": sequence_parsed["targets"],
-                    "sequence_len": context_parsed["sequence_len"], "target_len": context_parsed["target_len"]}
+            return {"sequence": sequence_parsed["sequence"],
+                    "sequence_len": context_parsed["sequence_len"], "target_len": context_parsed["target_len"]}, sequence_parsed["targets"]
 
-        dataset = tf.data.TFRecordDataset([path]).map(_parse, num_parallel_calls=5).shuffle(buffer_size=10000) # TODO: Find out what parse should be returning
+        dataset = tf.data.TFRecordDataset([path]).map(_parse, num_parallel_calls=5).shuffle(buffer_size=2*batch_size+1)
 
-        dataset = dataset.padded_batch(batch_size, padded_shapes={
-            "sequence_len": [],
-            "target_len": [],
+        dataset = dataset.padded_batch(batch_size, padded_shapes=({
             "sequence": [None],
-            "targets": [None]
-        })
+            "sequence_len": [],
+            "target_len": []},
+            tf.TensorShape([None]))
+        )
 
         return dataset
 
