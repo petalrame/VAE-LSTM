@@ -137,12 +137,12 @@ class Dataset(object):
 
         dataset = tf.data.TFRecordDataset([path]).map(_parse, num_parallel_calls=5).shuffle(buffer_size=2*batch_size+1)
 
-        dataset = dataset.padded_batch(batch_size, padded_shapes=({
-            "sequence": [None],
-            "sequence_len": [],
+        padded_shapes = ({"sequence": tf.TensorShape([None]), # input sequence
+            "sequence_len": [], # length(of size batch_size) needs no padding
             "target_len": []},
-            tf.TensorShape([None]))
-        )
+            tf.TensorShape([None])) # target sequence of unknown size
+
+        dataset = dataset.padded_batch(batch_size, padded_shapes=padded_shapes)
 
         return dataset
 

@@ -1,6 +1,6 @@
 import os
-from handler import Dataset
-from vocab import Vocab
+from src.data.handler import Dataset
+from src.data.vocab import Vocab
 
 import tensorflow as tf
 
@@ -20,7 +20,7 @@ def test():
 
     with tf.Session() as sess:
         sess.run(iter.initializer)
-        for i in range(1):
+        for _ in range(1):
             print(sess.run(next))
 
 if __name__ == '__main__':

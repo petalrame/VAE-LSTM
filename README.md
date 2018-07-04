@@ -5,25 +5,21 @@ Implementation of "A Deep Generative Framework for Paraphrase Generation"(**VAE-
 ## File Structure
 
 ```
-|- data/
-| |- __init__.py
-| |- download.py --> Downloads dataset and splits it into train/test/eval
-| |- handler.py --> Makes TFRecords from the data
-| |- vocab.py --> Handles the vocab
-|- models/
-| |- __init__.py
-| |- basic_model.py --> Base class for all models
-| |- model.py --> Class for our implementation
-|- results/
-| |- .gitkeep
-|- tests/
-| |- [VARIOUS TEST FILES]
-|- utils/
-| |- [HPSEARCH FILES]
-| |- [MISC. FILES] --> e.g saving/loading etc.
-|- main.py --> Training, inference, eval, TF app entry
-|- .gitignore
-|- README.md
+├── README.md
+├── data
+│   ├── external => External Data(e.g word vectors)
+│   ├── interim => Cleaned data before undergoing writing to tfrecord
+│   ├── processed => tfrecord files for train/eval and vocab
+│   └── raw => Downloaded or collected data
+├── docs => Contain some notes on the implementation 
+├── results => Output of experiments
+└── src
+    ├── data => Preprocessing code(i.e downloading, cleaning data and making vocab)
+    ├── external => I'm thinking this is where the CLIs are gonna go
+    ├── models => Contains any and all models created
+    ├── tests => Contains tests for preprocessing and the models
+    ├── tools => Contains utilities and eval scripts(e.g BLEU script for NMT)
+    └── visualization => Any sort of code used for making visualizations of the data
 ```
 
 For more on file structure see [3]
@@ -43,5 +39,4 @@ I will describe the commands for testing the model here. **IN PROGRESS - I HAVE 
 ## Useful Links
 
 1. The Paper - ["A Deep Generative Framework for Paraphrase Generation"](https://www.cse.iitk.ac.in/users/piyush/papers/deep-paraphrase-aaai2018.pdf)
-2. Blogpost on Dataset API - ["Getting Text into Tensorflow with the Dataset API"](https://medium.com/@TalPerry/getting-text-into-tensorflow-with-the-dataset-api-ffb832c8bec6)
-3. Blogpost on Good Practices - ["Tensorflow: A proposal of good practices for files, folders and models architecture"](https://blog.metaflow.fr/tensorflow-a-proposal-of-good-practices-for-files-folders-and-models-architecture-f23171501ae3)
+2. Blogpost on Dataset AP(Better ways to do this found in resources in the docs) - ["Getting Text into Tensorflow with the Dataset API"](https://medium.com/@TalPerry/getting-text-into-tensorflow-with-the-dataset-api-ffb832c8bec6)

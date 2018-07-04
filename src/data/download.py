@@ -15,7 +15,7 @@ import requests
 from tqdm import tqdm
 
 from vocab import Vocab
-from handler import Dataset
+from dataset import Dataset
 
 # put your data directories here
 WORKING_DIR = os.path.abspath(os.path.dirname(__file__)) # path to file
@@ -104,7 +104,7 @@ def zip_handler(zipf, path):
     keep_files = glob.glob(os.path.join(del_dir,'captions_*.json'))
     print("Keeping the following files:", keep_files)
 
-    # Move the files to keep into the working dir
+    # Move the files to keep into the data directory
     for file in keep_files:
         shutil.move(file, path)
 
