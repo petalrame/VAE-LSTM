@@ -17,7 +17,7 @@ THINGS TO TEST:
 - [ ] Data Split
 - [ ] Data Cleaning
 - [ ] Vocab Building/ Testing max_keep option in save_vocab fn
-- [ ] The dataset that gets built
+- [ ] The dataset that gets built(make sure it has the right shapes)
 
 ## TODO
 - [ ] Build input functions to feed the Estimator API
