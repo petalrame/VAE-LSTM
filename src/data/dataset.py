@@ -97,7 +97,7 @@ class Dataset(object):
 
         return tf.train.SequenceExample(context=tf.train.Features(feature=context_features), feature_lists=tf.train.FeatureLists(feature_list=feature_list))
 
-    def make_dataset(self, path, batch_size):
+    def train_input_fn(self, path, batch_size):
         """ Make a Tensorflow dataset that is shuffled, batched and parsed
         Args:
             path: path of the record file to unpack and read
@@ -107,7 +107,7 @@ class Dataset(object):
         """
 
         if not os.path.isfile(path):
-            raise Exception('ERROR: Path to directory does not exist or is not a directory')
+            raise Exception('ERROR: Provided path is not a file')
 
         def _parse(ex):
             """ Explain to TF how to go back from a serialized example to tensors
@@ -135,7 +135,7 @@ class Dataset(object):
             return {"source_seq": sequence_parsed["source_seq"],
                     "source_len": context_parsed["source_len"]}, {"target_seq": sequence_parsed["target_seq"], "target_len": context_parsed["target_len"]}
 
-        dataset = tf.data.TFRecordDataset([path]).map(_parse, num_parallel_calls=5).shuffle(buffer_size=2*batch_size+1)
+        dataset = tf.data.TFRecordDataset([path]).map(_parse, num_parallel_calls=5).shuffle(buffer_size=2*batch_size+1).repeat(None)
 
         padded_shapes = ({"source_seq": tf.TensorShape([None]), # pads to largest sentence in batch
             "source_len": tf.TensorShape([])}, # No padding
@@ -146,25 +146,15 @@ class Dataset(object):
 
         return dataset
 
-    def prep_dataset_iter(self, path, batch_size):
-        """ Makes a dataset iterator with size batch size
+    def predict_input_fn(self, path, batch_size=None):
+        """ Used to shape input for predict mode
         Args:
-            path: path to the tfrecord file
-            batch_size: Size of the training batch
+            path: Path to the data to be read
+            batch_size: Optional batch size for prediction
         Returns:
-            iterator: The iterator for the dataset. To be initialized with iterator.initializer
-            next_element: The next element of the iterator
+            dataset: A tf.data.Dataset where the tuple returned is features, _
         """
-        if not os.path.isfile(path):
-            raise Exception("ERROR: Provided path is not a file")
-
-        ds = self.make_dataset(path, batch_size=batch_size)
-
-        # Make an interator object the shape of the dataset
-        iterator = ds.make_initializable_iterator()
-        next_element = iterator.get_next()
-
-        return iterator, next_element
+        return NotImplementedError
 
 
 

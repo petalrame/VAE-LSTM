@@ -18,11 +18,11 @@ def dataset():
     vocab = Vocab(VOCAB_PATH)
     return Dataset(vocab)
 
-def test_prep_dataset_iter_type(dataset):
+def test_train_input_fn_type(dataset):
     """ Test the handler capability to create dataset from tfrecord file format
     """
 
-    iter, next = dataset.prep_dataset_iter(TRAIN_RECORD, 3)
+    iter, next = dataset.train_input_fn(TRAIN_RECORD, 3)
 
     with tf.Session() as sess:
         sess.run(iter.initializer)
@@ -33,11 +33,11 @@ def test_prep_dataset_iter_type(dataset):
             assert isinstance(features, dict)
             assert isinstance(labels, dict)
 
-def test_prep_dataset_iter_structure(dataset):
+def test_train_input_fn_structure(dataset):
     """ Test the handler capability to create dataset from tfrecord file format
     """
 
-    iter, next = dataset.prep_dataset_iter(TRAIN_RECORD, 3)
+    iter, next = dataset.train_input_fn(TRAIN_RECORD, 3)
 
     with tf.Session() as sess:
         sess.run(iter.initializer)

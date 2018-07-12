@@ -18,13 +18,12 @@ This doc is for notating the progress on the project as well as providing an ove
 
 ## THINGS TO TEST:
 
-- [ ] Vocab Building/ Testing max_keep option in save_vocab fn
-- [ ] The dataset that gets built(make sure it has the right shapes)
+- [x] The dataset that gets built(make sure it has the right shapes)
 
 ## TODO
 
-- [ ] Build input functions to feed the Estimator API
-- [ ] Write tests for the data pipeline
+- [x] Build input functions to feed the Estimator API
+- [x] Write tests for the data pipeline
 - [ ] Write the model code for RVAE
 - [ ] Add options in graph building for inference mode
 - [ ] Finish writing logs for Tensorboard
