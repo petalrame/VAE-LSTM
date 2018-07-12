@@ -216,8 +216,6 @@ def preprocess(vocab, max_keep=None):
     for data, record in [(TRAIN_DATA, TRAIN_RECORD), (VAL_DATA, VAL_RECORD)]:
         handler.dataset_to_example(data, record)
 
-    handler.prep_dataset_iter(TRAIN_RECORD, 32)
-
     return
 
 

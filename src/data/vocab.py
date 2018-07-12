@@ -17,7 +17,7 @@ UNK = "<UNK>"
 class Vocab(object):
     """ For reading data, processing for input, and writing to TFRecords
     """
-    def __init__(self, vocab_path):
+    def __init__(self, vocab_path=None):
         """ Creates a vocab from training data and/or pretrained word vectors
         Args:
             vocab_path: Path to save/load the vocab file
@@ -34,7 +34,7 @@ class Vocab(object):
         self.next = 3 # after 2 is 3 and so on...
 
         # Reads created vocab from file if it exists
-        if os.path.isfile(vocab_path):
+        if vocab_path and os.path.isfile(vocab_path):
             self.load_vocab(vocab_path)
 
 

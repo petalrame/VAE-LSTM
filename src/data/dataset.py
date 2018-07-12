@@ -87,12 +87,12 @@ class Dataset(object):
 
         # create key/value pair for features
         context_features = {
-            "sequence_len": _int64_feature(seq_len),
+            "source_len": _int64_feature(seq_len),
             "target_len": _int64_feature(target_len),
         }
         feature_list = {
-            "sequence": _int64_feature_list(sequence),
-            "targets": _int64_feature_list(target),
+            "source_seq": _int64_feature_list(sequence),
+            "target_seq": _int64_feature_list(target),
         }
 
         return tf.train.SequenceExample(context=tf.train.Features(feature=context_features), feature_lists=tf.train.FeatureLists(feature_list=feature_list))
@@ -118,12 +118,12 @@ class Dataset(object):
             """
             # Define how to parse the example
             context_features = {
-                "sequence_len": tf.FixedLenFeature([], dtype=tf.int64),
+                "source_len": tf.FixedLenFeature([], dtype=tf.int64),
                 "target_len": tf.FixedLenFeature([], dtype=tf.int64)
             }
             sequence_features = {
-                "sequence": tf.FixedLenSequenceFeature([], dtype=tf.int64),
-                "targets": tf.FixedLenSequenceFeature([], dtype=tf.int64)
+                "source_seq": tf.FixedLenSequenceFeature([], dtype=tf.int64),
+                "target_seq": tf.FixedLenSequenceFeature([], dtype=tf.int64)
             }
             #Parse the example and return dict of tensors
             context_parsed, sequence_parsed = tf.parse_single_sequence_example(
@@ -132,15 +132,15 @@ class Dataset(object):
                 sequence_features=sequence_features
             )
 
-            return {"sequence": sequence_parsed["sequence"],
-                    "sequence_len": context_parsed["sequence_len"], "target_len": context_parsed["target_len"]}, sequence_parsed["targets"]
+            return {"source_seq": sequence_parsed["source_seq"],
+                    "source_len": context_parsed["source_len"]}, {"target_seq": sequence_parsed["target_seq"], "target_len": context_parsed["target_len"]}
 
         dataset = tf.data.TFRecordDataset([path]).map(_parse, num_parallel_calls=5).shuffle(buffer_size=2*batch_size+1)
 
-        padded_shapes = ({"sequence": tf.TensorShape([None]), # input sequence
-            "sequence_len": [], # length(of size batch_size) needs no padding
-            "target_len": []},
-            tf.TensorShape([None])) # target sequence of unknown size
+        padded_shapes = ({"source_seq": tf.TensorShape([None]), # pads to largest sentence in batch
+            "source_len": tf.TensorShape([])}, # No padding
+            {"target_seq": tf.TensorShape([None]),
+            "target_len": tf.TensorShape([])})
 
         dataset = dataset.padded_batch(batch_size, padded_shapes=padded_shapes)
 
