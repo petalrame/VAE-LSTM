@@ -11,8 +11,12 @@ class RVAE(object):
     def __init__(self, hps):
         self.hps = hps
 
-    def embedding(self, features, labels):
+    def embedding(self, input):
         """ Create the embedding layer to be used for taking inputs from the input_fn """
+        vsize = self.hps['vocab_size']
+        emb_dim = self.hps['embedding_dimension']
+        with tf.variable_scope('embedding'):
+            embedding = tf.get_variable('embedding', [vsize, emb_dim], dtype=tf.float32)
         return NotImplementedError
 
     def encoder(self, input, mode):
