@@ -1,4 +1,5 @@
 """ This is the command line interface for the implementation of the Recurrent Variational Autoencoder """
+from __future__ import absolute_import, division, print_function
 
 import numpy as np
 import tensorflow as tf
@@ -17,7 +18,7 @@ tf.app.flags.DEFINE_string('embed_path', '', 'Path to the serialized pretrained 
 tf.app.flags.DEFINE_string('mode', 'train', 'must be one of train/eval/predict')
 
 # Where to save the outputs of your experiments
-tf.app.flags.DEFINE_string('results_dir', '', 'Directory to store all the outputs(logs/checkpoints/etc). Must be provided for eval and predict mode(s)')
+tf.app.flags.DEFINE_string('model_dir', '', 'Directory to store all the outputs(logs/checkpoints/etc). Must be provided for eval and predict mode(s)')
 tf.app.flags.DEFINE_string('exp_name', '', 'Name of the experiment. Results dir will have this name')
 
 # Hyperparameters

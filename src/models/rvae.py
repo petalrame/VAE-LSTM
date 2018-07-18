@@ -11,12 +11,28 @@ class RVAE(object):
     def __init__(self, hps):
         self.hps = hps
 
-    def embedding(self, inputs, embed_tensor):
-        """ Create the embedding layer to be used for taking inputs from the input_fn """
+    def embedding(self, inputs, emb_tensor, emb_dim):
+        """ Create the embedding layer that parses the input tensor 
+        Args:
+            inputs: An iterable of `Tensor`s
+            emb_tensor: A `Tensor` that contains the embedding for each token in vocab
+            emb_dim: `int`, number of embedding dimensions
+        Returns:
+            An iterable of tensors corresponding to [batch_size, seq_len, emb_dim]
+        """
         return NotImplementedError
 
-    def encoder(self, input, mode):
-        """ Creates the encoding layer for the RVAE """
+    def encoder(self, input, hidden_dim, scope, reuse):
+        """ Creates an encoder for parsing inputs
+        Args:
+            input: `Tensor`, input tensor
+            hidden_dim: `int`, size of the hidden dimension for the LSTMCell
+            initializers: specify/pass initializers for variables
+            scope: `string`, allows variable reuse or creation of new ones with same function
+            reuse: `bool`, indicates if variable(s) should be reused if it's present in scope
+        Returns:
+            fwd_state, bw_state: Forward and backward states of the encoder
+        """
         return NotImplementedError
 
     def vae(self, input):
@@ -24,7 +40,7 @@ class RVAE(object):
         return NotImplementedError
 
     def decoder(self, input, mode):
-        """ Creates the decoding layer for the RVAE """
+        """ Creates a decoder to produce outputs """
         return NotImplementedError
 
     def train_op(self):
