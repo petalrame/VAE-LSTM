@@ -1,9 +1,9 @@
 """ Implementation of the Reccurrent Variational Autoencoder """
+from __future__ import absolute_import, division, print_function
 
 import tensorboard
-# Globals kept here
 import tensorflow as tf
-from tensorflow import layers
+from tensorflow import keras, layers
 
 
 class RVAE(object):
@@ -11,12 +11,8 @@ class RVAE(object):
     def __init__(self, hps):
         self.hps = hps
 
-    def embedding(self, input):
+    def embedding(self, inputs, embed_tensor):
         """ Create the embedding layer to be used for taking inputs from the input_fn """
-        vsize = self.hps['vocab_size']
-        emb_dim = self.hps['embedding_dimension']
-        with tf.variable_scope('embedding'):
-            embedding = tf.get_variable('embedding', [vsize, emb_dim], dtype=tf.float32)
         return NotImplementedError
 
     def encoder(self, input, mode):
@@ -48,4 +44,3 @@ class RVAE(object):
             needs.
         """
         return NotImplementedError
-
