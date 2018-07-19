@@ -7,6 +7,7 @@ from collections import Counter, defaultdict
 
 import nltk
 import numpy as np
+import tensorflow as tf
 
 # Additions of special characters for sequence generation. You may add your own...
 PAD = "<PAD>"
@@ -123,9 +124,7 @@ class Vocab(object):
         Args:
             path: Path to the embedding file
         Returns:
-            embeddings: A dictionary of words to their corresponding vector
-            length: The length of the word embedding
-            dim: The dimension of the word embedding
+            embedding_matrix: A numpy array of (vocab_size, embedding_dim)
         """
 
         if not os.path.isfile(path):
@@ -134,14 +133,27 @@ class Vocab(object):
         print("Reading embeddings from:", path)
 
         fin = io.open(path, 'r', encoding='utf-8', newline='\n', errors='ignore')
-        length, dim = map(int, fin.readline().split())
+        _, dim = map(int, fin.readline().split())
 
+        # read the fasttext embeddings into a dictionary
         embeddings = {}
         for line in fin:
             tokens = line.rstrip().split(' ')
             embeddings[tokens[0]] = map(float, tokens[1:])
 
-        return embeddings, length, dim
+        def embed_initializer(shape=None, dtype=tf.float32, partition_info=None):
+            assert dtype is tf.float32
+            return embedding_matrix
+
+        # turn the embeddings dict into a numpy array
+        vsize = len(self.vocab)
+        embedding_matrix = np.random.uniform(-1, 1, size=(vsize, dim))
+        for w, i in self.vocab.items():
+            v = embeddings.get(w)
+            if v is not None and i < vsize:
+                embedding_matrix[i] = v
+
+        return embed_initializer
 
     def save_vocab(self, path, max_keep=None):
         """ Saves the vocabulary to file.
