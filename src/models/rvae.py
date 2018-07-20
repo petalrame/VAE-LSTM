@@ -21,16 +21,14 @@ class RVAE(object):
             hidden_dim: `int`, size of the hidden dimension for the LSTMCell
             initializer: specify/pass initializers for variables
         Returns:
-            src_enc_outputs: Concatonated fw_output and bw_output with shape (batch_size, max_seq_len, 2*emb_dim)
             fw_state, bw_state: Forward and backward states of the encoder with shape (batch_size, hidden_dim)
         """
-        #TODO: Add highway conncetions
+        #TODO: Add highway connections(you will have to made your own)
         with tf.variable_scope('source_encoder'):
             cell_fw = tf.nn.rnn_cell.LSTMCell(hidden_dim, initializer=initializer, state_is_tuple=True)
             cell_bw = tf.nn.rnn_cell.LSTMCell(hidden_dim, initializer=initializer, state_is_tuple=True)
-            (src_enc_outputs, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, input, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
-            src_enc_outputs = tf.concat(src_enc_outputs, 2)
-        return src_enc_outputs, fw_st, bw_st
+            (_, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, input, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
+        return fw_st, bw_st
 
     def _add_target_encoder(self, input, fw_st, bw_st, seq_len, hidden_dim, initializer):
         """ Adds a single-layer bidirectional LSTM encoder to parse the original sentence(source_seq)
@@ -42,16 +40,14 @@ class RVAE(object):
             hidden_dim: `int`, size of the hidden dimension for the LSTMCell
             initializer: specify/pass initializers for variables
         Returns:
-            encoder_outputs: Concatonated fw_output and bw_output with shape (batch_size, max_seq_len, 2*emb_dim)
             fwd_state, bw_state: Forward and backward states of the encoder with shape (batch_size, hidden_dim)
         """
-        #TODO: Add highway conncetions
+        #TODO: Add highway linear layers
         with tf.variable_scope('target_encoder'):
             cell_fw = tf.nn.rnn_cell.LSTMCell(hidden_dim, initializer=initializer, state_is_tuple=True)
             cell_bw = tf.nn.rnn_cell.LSTMCell(hidden_dim, initializer=initializer, state_is_tuple=True)
-            (tgt_enc_outputs, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, input, initial_state_fw=fw_st, initial_state_bw=bw_st, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
-            tgt_enc_outputs = tf.concat(tgt_enc_outputs, 2)
-        return tgt_enc_outputs, fw_st, bw_st
+            (_, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, input, initial_state_fw=fw_st, initial_state_bw=bw_st, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
+        return fw_st, bw_st
 
     def vae(self, input):
         """ Builds and creates the variational autoencoder ops """
@@ -99,11 +95,22 @@ class RVAE(object):
                     emb_tgt_inputs = tf.nn.embedding_lookup(embedding, labels['target_seq']) # (batch_size, max_seq_len, emb_dim) for target encoding
 
         # pass the embedded tensors to the source encoder
-        src_enc_outputs, src_fw_st, src_bw_st = self._add_source_encoder(emb_src_inputs, features['source_len'], self.hps.hidden_dim, rand_unif_init)
+        src_fw_st, src_bw_st = self._add_source_encoder(emb_src_inputs, features['source_len'], self.hps.hidden_dim, rand_unif_init)
 
         # pass embedded tensors to the target encoder
         if mode == tf.estimator.ModeKeys.TRAIN:
-            tgt_enc_outputs, tgt_fwd_st, tgt_bw_st = self._add_target_encoder(emb_tgt_inputs, src_fw_st, src_bw_st, labels['target_len'], self.hps.hidden_dim, rand_unif_init)
-            # TODO; Concat cell states and calculate features for vae
+            tgt_fw_st, tgt_bw_st = self._add_target_encoder(emb_tgt_inputs, src_fw_st, src_bw_st, labels['target_len'], self.hps.hidden_dim, rand_unif_init)
+            # TODO; Concat cell states  as is(dimension is fine)and calculate features for vae
+            enc_output = tf.concat([tgt_fw_st, tgt_bw_st], 1) # shape (batch_size, hidden_dim*2)
+        else:
+            enc_output = tf.concat([src_fw_st, src_bw_st], 1) # shape (batch_size, hidden_dim*2)
+
+        # calculate mean and std
+        mu = tf.layers.dense(enc_output, self.hps.latent_dim)
+        logvar = tf.layers.dense(enc_output, self.hps.latent_dim)
+        std = tf.exp(0.5 * logvar) # TODO: Figure out if this is the right way to do this
+
+        # feed 
+
 
         return NotImplementedError
