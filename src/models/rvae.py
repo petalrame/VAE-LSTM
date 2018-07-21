@@ -3,7 +3,7 @@ from __future__ import absolute_import, division, print_function
 
 import tensorboard
 import tensorflow as tf
-from tensorflow import keras, layers
+from tensorflow import layers
 
 FLAGS = tf.app.flags.FLAGS
 
@@ -81,6 +81,7 @@ class RVAE(object):
         """
         # create some global initializers
         rand_unif_init = tf.random_uniform_initializer(-1.0,1.0, seed=123)
+        rand_norm_init = tf.random_normal_initializer(stddev=0.001)
         embedding_init = params['embedding_initializer']
 
 
@@ -100,17 +101,20 @@ class RVAE(object):
         # pass embedded tensors to the target encoder
         if mode == tf.estimator.ModeKeys.TRAIN:
             tgt_fw_st, tgt_bw_st = self._add_target_encoder(emb_tgt_inputs, src_fw_st, src_bw_st, labels['target_len'], self.hps.hidden_dim, rand_unif_init)
-            # TODO; Concat cell states  as is(dimension is fine)and calculate features for vae
             enc_output = tf.concat([tgt_fw_st, tgt_bw_st], 1) # shape (batch_size, hidden_dim*2)
         else:
             enc_output = tf.concat([src_fw_st, src_bw_st], 1) # shape (batch_size, hidden_dim*2)
 
-        # calculate mean and std
-        mu = tf.layers.dense(enc_output, self.hps.latent_dim)
-        logvar = tf.layers.dense(enc_output, self.hps.latent_dim)
-        std = tf.exp(0.5 * logvar) # TODO: Figure out if this is the right way to do this
+        # pass through the linear layer and calculate mean and std 
+        # TODO: Put into function, calculate prior, and return the MultivariateNormalDistribution
+        mu = tf.layers.dense(enc_output, self.hps.latent_dim, kernel_initializer=rand_norm_init) # mean with shape (batch_size, latent_dim)
+        sigma = tf.layers.dense(enc_output, self.hps.latent_dim, tf.nn.softplus, kernel_initializer=rand_norm_init) # logvar with shape (batch_size, latent_dim)
+        q_z = tf.contrib.distributions.MultivariateNormalDiag(mu, sigma)
+        z = q_z.sample()
 
-        # feed 
+
+
+        # feed mean and std to kld
 
 
         return NotImplementedError
