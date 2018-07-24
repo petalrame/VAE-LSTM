@@ -5,6 +5,9 @@ import tensorboard
 import tensorflow as tf
 from tensorflow import layers
 
+ds = tf.contrib.distributions
+seq2seq = tf.contrib.seq2seq
+
 FLAGS = tf.app.flags.FLAGS
 
 class RVAE(object):
@@ -13,24 +16,46 @@ class RVAE(object):
         self._hps = hps
         self._vsize = vocab_size #TODO: Change this/find a better way to pass in vocab_size
 
-    def _add_source_encoder(self, input, seq_len, hidden_dim, initializer):
+    def _embedding_layer(self, input, initializer):
+        """ Adds the embedding layer that is used for the encoder and decoder inputs
+        Args:
+            input: `Tensor` of shape (batch_size, max_seq_len)
+            initializer: To initialize the embeddings
+        Returns:
+            emb_tensor: `Tensor` of size (batch_size, max_seq_len, emb_dim)
+        """
+        with tf.variable_scope('embedding', reuse=tf.AUTO_REUSE):
+            embedding = tf.get_variable('embedding', [self._vsize, self._hps.emb_dim], dtype=tf.float32, initializer=initializer) # initialize with pretrained word vecs
+            emb_tensor = tf.nn.embedding_lookup(embedding, input)
+
+        return emb_tensor
+
+    def _embedding_helper(self, input):
+        """ A helper for beam search decoding during predict mode
+        Args:
+            input: `Tensor` of shape (beam_size,)
+        Returns:
+            next_dec_input: `Tensor` of shape (beam_size, 1, )
+        """
+
+
+    def _add_source_encoder(self, input, seq_len, hidden_dim):
         """ Adds a single-layer bidirectional LSTM encoder to parse the original sentence(source_seq)
         Args:
             input: `Tensor`, input tensor of shape (batch_size, max_seq_len, emb_dim)
             seq_len: `Tensor` of (batch_size,)
             hidden_dim: `int`, size of the hidden dimension for the LSTMCell
-            initializer: specify/pass initializers for variables
         Returns:
             fw_state, bw_state: Forward and backward states of the encoder with shape (batch_size, hidden_dim)
         """
-        #TODO: Add highway connections(you will have to made your own)
+        #TODO: Add highway connections(you will have to make your own)
         with tf.variable_scope('source_encoder'):
-            cell_fw = tf.nn.rnn_cell.LSTMCell(hidden_dim, initializer=initializer, state_is_tuple=True)
-            cell_bw = tf.nn.rnn_cell.LSTMCell(hidden_dim, initializer=initializer, state_is_tuple=True)
+            cell_fw = tf.nn.rnn_cell.LSTMCell(hidden_dim, state_is_tuple=True)
+            cell_bw = tf.nn.rnn_cell.LSTMCell(hidden_dim, state_is_tuple=True)
             (_, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, input, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
         return fw_st, bw_st
 
-    def _add_target_encoder(self, input, fw_st, bw_st, seq_len, hidden_dim, initializer):
+    def _add_target_encoder(self, input, fw_st, bw_st, seq_len, hidden_dim):
         """ Adds a single-layer bidirectional LSTM encoder to parse the original sentence(source_seq)
         Args:
             input: `Tensor`, input tensor of shape (batch_size, max_seq_len, emb_dim)
@@ -38,36 +63,94 @@ class RVAE(object):
             bw_st: `Tensor`, bw hidden state of source encoder of shape (batch_size, hidden_dim)
             seq_len: `Tensor` of (batch_size,)
             hidden_dim: `int`, size of the hidden dimension for the LSTMCell
-            initializer: specify/pass initializers for variables
         Returns:
             fwd_state, bw_state: Forward and backward states of the encoder with shape (batch_size, hidden_dim)
         """
         #TODO: Add highway linear layers
         with tf.variable_scope('target_encoder'):
-            cell_fw = tf.nn.rnn_cell.LSTMCell(hidden_dim, initializer=initializer, state_is_tuple=True)
-            cell_bw = tf.nn.rnn_cell.LSTMCell(hidden_dim, initializer=initializer, state_is_tuple=True)
+            cell_fw = tf.nn.rnn_cell.LSTMCell(hidden_dim, state_is_tuple=True)
+            cell_bw = tf.nn.rnn_cell.LSTMCell(hidden_dim, state_is_tuple=True)
             (_, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, input, initial_state_fw=fw_st, initial_state_bw=bw_st, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
         return fw_st, bw_st
 
-    def _make_posterior(self, enc_output, latent_dim, initializaer):
+    def _make_posterior(self, enc_state, latent_dim, initializaer):
         """ Builds ops to calculate the posterior and sample from it
         Args:
-            enc_output: `Tensor` of batch size (batch_size, hidden_dim*2) from encoder
+            enc_state: `Tensor` of batch size (batch_size, hidden_dim*2) from encoder
         Returns:
             A tf.distributions.MultivariateNormalDiag representing the posterior for each seq
         """
         # get mu and sigma
-        mu = tf.layers.dense(enc_output, latent_dim, kernel_initializer=initializaer) # mean with shape (batch_size, latent_dim)
-        sigma = tf.layers.dense(enc_output, latent_dim, tf.nn.softplus, kernel_initializer=initializaer) # logvar with shape (batch_size, latent_dim)
+        with tf.variable_scope('posterior'):
+            mu = tf.layers.dense(enc_state, latent_dim, kernel_initializer=initializaer) # mean with shape (batch_size, latent_dim)
+            sigma = tf.layers.dense(enc_state, latent_dim, tf.nn.softplus, kernel_initializer=initializaer) # logvar with shape (batch_size, latent_dim)
 
-        return tf.contrib.distributions.MultivariateNormalDiag(loc=mu, scale_diag=sigma)
+            posterior = ds.MultivariateNormalDiag(loc=mu, scale_diag=sigma)
 
-    def decoder(self, input, mode):
-        """ Creates a decoder to produce outputs """
-        return NotImplementedError
+        return posterior
 
-    def train_op(self):
-        """ Creates and adds training ops to the graph """
+    def _add_decoder(self, enc_state, hidden_dim, num_layers, z, keep_prob, mode, initializer, train_inputs=None):
+        """ Creates a decoder to produce outputs 
+        Args: 
+            enc_state: `Tensor`, Final enc_state after linear layer of shape (batch_size, hidden_dim).
+              Used for the decoder's inital state
+            latent_dim: `int` to specify the size of the latent_dim
+            hidden_dim: `int`, size of the hidden dimension for the LSTM cell
+            z: `Tensor` of shape (batch_size, latent_dim). The sampled z from the posterior distribution
+            keep_prob: `float` 1-dropout rate for dropout
+            mode: `tf.estimator.ModeKeys` specifies the mode and determines what ops to add to the graph
+            initializer: Initializer for the projection layer
+            train_inputs: A tuple of `Tensor`s that specify inputs for the decoder during training. If in prediction mode, this should be None.
+            Contains:
+              enc_dec_inputs: Inputs for the decoder of shape (batch_size, max_seq_len, emb_dim)
+              target_len: Length of target sequences of shape (batch_size,)
+        """
+
+        # argument validation
+        if mode == tf.estimator.ModeKeys.PREDICT:
+            assert train_inputs == None, 'Invalid input for predict mode. train_inputs is not None'
+            assert keep_prob == 1.0, 'Invalid input for predict mode. keep_prob is not 1.0'
+            assert self._hps.batch_size == 1, 'Invalid batch_size for inference'
+        else:
+            assert len(train_inputs) == 2, 'Invalid number of arguments for train input'
+            enc_dec_inputs, target_len = train_inputs
+
+        with tf.variable_scope('decoder'):
+            dec_cells = [tf.nn.rnn_cell.LSTMCell(hidden_dim, state_is_tuple=True) for _ in range(num_layers)]
+
+            stacked_cell = tf.nn.rnn_cell.MultiRNNCell(dec_cells)
+
+            # add dropout
+            stacked_cell = tf.nn.rnn_cell.DropoutWrapper(stacked_cell, input_keep_prob=keep_prob)
+
+            projection_layer = tf.layers.dense(self._hps.hidden_dim, self._vsize, kernel_initializer=initializer, bias_initializer=initializer)
+
+            if mode != tf.estimator.ModeKeys.PREDICT:
+                # make inputs for decoder
+                [_,seq_len,_] = enc_dec_inputs.get_shape().as_list()
+                z = tf.concat(tf.tile([z], [seq_len, 1, 1]),1) # (seq_len, batch_size, latent_dim)
+                z = tf.reshape(z, [self._hps.batch_size, seq_len, self._hps.latent_dim])
+                helper = seq2seq.ScheduledOutputTrainingHelper(enc_dec_inputs, target_len, sampling_probability=0.0, auxiliary_inputs=z)
+                # at each t, the shape of the input will be (batch_size, latent_dim+emb_dim)
+                # TODO: Refine decoder
+                decoder = seq2seq.BasicDecoder(stacked_cell, helper, initial_state=enc_state, output_layer=projection_layer)
+            else:
+                # TODO: Refine BeamSearchDecoder
+                decoder = seq2seq.BeamSearchDecoder(stacked_cell, self._embedding_helper, [1], initial_state=enc_state, beam_width=self._hps.beam_size, output_layer=projection_layer)
+
+            # unroll the decoder
+            outputs, _, _ = seq2seq.dynamic_decode(decoder, impute_finished=True, maximum_iterations=self._hps.max_dec_steps)
+
+        return outputs
+
+    def _calc_losses(self, q_z, p_z, dec_outputs, anneal_rate):
+        """ Adds ops to calculate losses for training 
+        Args:
+            q_z: The posterior distribution for calculating KL Divergence
+            p_z: The prior distribution for calculating KL Divergence
+            decoder_outputs: The outputs of the decoder. whatever that may be. TODO: Figure out specifics of dec_outputs
+            anneal_rate: Rate for KL Divergence annealing. Helps for training
+        """
         return NotImplementedError
 
     def model_fn(self, features, labels, mode, params):
@@ -91,44 +174,40 @@ class RVAE(object):
         # create some global initializers
         rand_unif_init = tf.random_uniform_initializer(-1.0,1.0, seed=123)
         rand_norm_init = tf.random_normal_initializer(stddev=0.001)
+        trunc_norm_init = tf.truncated_normal_initializer(stddev=0.0001)
         embedding_init = params['embedding_initializer']
 
-
         # embed all necessary input tensors
-        with tf.variable_scope('embedding'):
-            embedding = tf.get_variable('embedding', [self._vsize, self._hps.emb_dim], dtype=tf.float32, initializer=embedding_init) # initialize with pretrained word vecs
-            emb_src_inputs = tf.nn.embedding_lookup(embedding, features['source_seq']) # (batch_size, max_seq_len, emb_dim)
-            if mode != tf.estimator.ModeKeys.PREDICT:
-                emb_dec_inputs = [tf.nn.embedding_lookup(embedding, x) for x in tf.unstack(labels['target_seq'])]
-                # A list of `Tensor`s of length max_target_seq_len and shape (batch_size, emb_dim)
-                if mode == tf.estimator.ModeKeys.TRAIN:
-                    emb_tgt_inputs = tf.nn.embedding_lookup(embedding, labels['target_seq']) # (batch_size, max_seq_len, emb_dim) for target encoding
+        emb_src_inputs = self._embedding_layer(features['source_seq'], embedding_init)
+        if mode != tf.estimator.ModeKeys.PREDICT:
+            emb_tgt_inputs = self._embedding_layer(labels['target_seq'], embedding_init)
 
         # pass the embedded tensors to the source encoder
-        src_fw_st, src_bw_st = self._add_source_encoder(emb_src_inputs, features['source_len'], self._hps.hidden_dim, rand_unif_init)
+        src_fw_st, src_bw_st = self._add_source_encoder(emb_src_inputs, features['source_len'], self._hps.hidden_dim)
+        src_enc_state = tf.concat([src_fw_st, src_bw_st], 1) # shape (batch_size, hidden_dim*2)
 
         # pass embedded tensors to the target encoder
         if mode == tf.estimator.ModeKeys.TRAIN:
-            tgt_fw_st, tgt_bw_st = self._add_target_encoder(emb_tgt_inputs, src_fw_st, src_bw_st, labels['target_len'], self._hps.hidden_dim, rand_unif_init)
-            enc_output = tf.concat([tgt_fw_st, tgt_bw_st], 1) # shape (batch_size, hidden_dim*2)
+            tgt_fw_st, tgt_bw_st = self._add_target_encoder(emb_tgt_inputs, src_fw_st, src_bw_st, labels['target_len'], self._hps.hidden_dim)
+            train_enc_state = tf.concat([tgt_fw_st, tgt_bw_st], 1) # shape (batch_size, hidden_dim*2)
+            # calculate posterior with train_enc_state
+            q_z = self._make_posterior(train_enc_state, self._hps.latent_dim, rand_norm_init)
         else:
-            enc_output = tf.concat([src_fw_st, src_bw_st], 1) # shape (batch_size, hidden_dim*2)
-
-        # add the posterior distribution and sample from it
-        q_z = self._make_posterior(enc_output, self._hps.latent_dim, rand_norm_init)
-        z = q_z.sample()
+            # add the posterior distribution and sample from it
+            q_z = self._make_posterior(src_enc_state, self._hps.latent_dim, rand_norm_init)
+        z = q_z.sample() # shape (batch_size, latent_dim)
 
         # add the prior distribution for loss
-        p_z = tf.contrib.distributions.MultivariateNormalDiag(loc=[0.]*self._hps.latent_dim,scale_diag=[1.]*self._hps.latent_dim)
+        p_z = ds.MultivariateNormalDiag(loc=[0.]*self._hps.latent_dim,scale_diag=[1.]*self._hps.latent_dim)
+
+        dec_init_state = tf.layers.dense(src_enc_state, self._hps.hidden_dim, kernel_initializer=rand_unif_init)
 
         # TODO: Add decoder
+        if mode == tf.estimator.ModeKeys.PREDICT:
+            dec_outputs = self._add_decoder(dec_init_state, self._hps.hidden_dim, self._hps.dec_layers, z, self._hps.keep_prob, trunc_norm_init, mode)
+        else:
+            dec_outputs = self._add_decoder(dec_init_state, self._hps.hidden_dim, self._hps.dec_layers, z, self._hps.keep_prob, trunc_norm_init, mode, (emb_tgt_inputs, labels['target_len']))
 
         # TODO: Computes losses with KL annealing or something
-
-
-
-
-        # feed mean and std to kld
-
 
         return NotImplementedError

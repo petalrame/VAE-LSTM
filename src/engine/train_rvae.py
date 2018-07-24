@@ -26,11 +26,12 @@ tf.app.flags.DEFINE_integer('batch_size', 32, 'size of the mini batches of data'
 tf.app.flags.DEFINE_integer('emb_dim', 300, 'dimension of the word embeddings')
 tf.app.flags.DEFINE_integer('hidden_dim', 600, 'size of the RNN hidden states')
 tf.app.flags.DEFINE_integer('latent_dim', 1100, 'size of the latent space')
-tf.app.flags.DEFINE_integer('max_dec_steps', 200, 'max timesteps for the decoder') # TODO: may not even be needed
-tf.app.flags.DEFINE_integer('beam_size', 4, 'beam size for beam search decoding')
+tf.app.flags.DEFINE_integer('dec_layers', 2, 'number of layers for the decoder')
+tf.app.flags.DEFINE_integer('beam_size', 10, 'beam size for beam search decoding')
+tf.app.flags.DEFINE_integer('max_dec_steps', 200, 'max time steps allowed for decoding')
 tf.app.flags.DEFINE_integer('vocab_size', 50000, 'size of vocab')
 tf.app.flags.DEFINE_float('lr', 0.00005, 'the learning rate')
-tf.app.flags.DEFINE_float('dropout', 0.3, 'dropout rate')
+tf.app.flags.DEFINE_float('keep_prob', 0.7, '1 - dropout rate')
 
 # Debugging
 tf.app.flags.DEFINE_boolean('debug', False, "Run in tensorflow's debug mode")
