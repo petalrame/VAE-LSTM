@@ -14,29 +14,35 @@ class RVAE(object):
     """ Builds the model graph for different modes(train, eval, predict) """
     def __init__(self, hps, vocab_size):
         self._hps = hps
-        self._vsize = vocab_size #TODO: Change this/find a better way to pass in vocab_size
+        self._vsize = vocab_size
 
-    def _embedding_layer(self, input, initializer):
+    def _embedding_layer(self, input):
         """ Adds the embedding layer that is used for the encoder and decoder inputs
         Args:
             input: `Tensor` of shape (batch_size, max_seq_len)
-            initializer: To initialize the embeddings
         Returns:
             emb_tensor: `Tensor` of size (batch_size, max_seq_len, emb_dim)
         """
-        with tf.variable_scope('embedding', reuse=tf.AUTO_REUSE):
-            embedding = tf.get_variable('embedding', [self._vsize, self._hps.emb_dim], dtype=tf.float32, initializer=initializer) # initialize with pretrained word vecs
-            emb_tensor = tf.nn.embedding_lookup(embedding, input)
+        with tf.variable_scope('embedding_layer', reuse=tf.AUTO_REUSE):
+            embedding = tf.get_variable('embedding_tensor', [self._vsize, self._hps.emb_dim], dtype=tf.float32, initializer=self._embedding_init) # initialize with pretrained word vecs
 
-        return emb_tensor
+        return tf.nn.embedding_lookup(embedding, input)
 
-    def _embedding_helper(self, input):
+    def _embedding_helper(self, input, z):
         """ A helper for beam search decoding during predict mode
         Args:
-            input: `Tensor` of shape (beam_size,)
+            input: A vector `Tensor` of shape (batch_size,beam_size) but batch_size should be 1 for predict calls
+            z: `Tensor` of shape (batch_size, latent_dim) used for concatonating output with sample
         Returns:
-            next_dec_input: `Tensor` of shape (beam_size, 1, )
+            next_dec_input: `Tensor` of shape (batch_size, beam_size, emb_dim+latent_dim)
         """
+
+        emb_word = self._embedding_layer(input) # shape (batch_size, beam_size, emb_dim)
+
+        z = tf.tile(tf.expand_dims(z, 1), [1,self._hps.beam_size,1]) # shape (batch_size, beam_size, latent_dim)
+        next_dec_input = tf.concat([emb_word,z],-1)
+
+        return next_dec_input
 
 
     def _add_source_encoder(self, input, seq_len, hidden_dim):
@@ -104,6 +110,10 @@ class RVAE(object):
             Contains:
               enc_dec_inputs: Inputs for the decoder of shape (batch_size, max_seq_len, emb_dim)
               target_len: Length of target sequences of shape (batch_size,)
+        Returns:
+            outputs: Differs from train/eval and predict modes
+              PREDICT: Outputs predicted_ids of (batch_size, steps_decoded, beam_size)
+              TRAIN/EVAL: Outputs logits of (batch_size, seq_len, vsize)
         """
 
         # argument validation
@@ -123,32 +133,42 @@ class RVAE(object):
             # add dropout
             stacked_cell = tf.nn.rnn_cell.DropoutWrapper(stacked_cell, input_keep_prob=keep_prob)
 
-            projection_layer = tf.layers.dense(self._hps.hidden_dim, self._vsize, kernel_initializer=initializer, bias_initializer=initializer)
+            projection_layer = tf.layers.Dense(self._vsize)
 
             if mode != tf.estimator.ModeKeys.PREDICT:
                 # make inputs for decoder
                 [_,seq_len,_] = enc_dec_inputs.get_shape().as_list()
-                z = tf.concat(tf.tile([z], [seq_len, 1, 1]),1) # (seq_len, batch_size, latent_dim)
-                z = tf.reshape(z, [self._hps.batch_size, seq_len, self._hps.latent_dim])
+                z = tf.tile(tf.expand_dims(z, 1), [1, seq_len, 1]) # (batch_size, seq_len, latent_dim)
                 helper = seq2seq.ScheduledOutputTrainingHelper(enc_dec_inputs, target_len, sampling_probability=0.0, auxiliary_inputs=z)
-                # at each t, the shape of the input will be (batch_size, latent_dim+emb_dim)
-                # TODO: Refine decoder
-                decoder = seq2seq.BasicDecoder(stacked_cell, helper, initial_state=enc_state, output_layer=projection_layer)
+                # at each t, the shape of the input will be (batch_size, latent_dim+emb_dim) after concat
+                decoder = seq2seq.BasicDecoder(cell=stacked_cell,
+                                               helper=helper,
+                                               initial_state=enc_state,
+                                               output_layer=projection_layer)
             else:
-                # TODO: Refine BeamSearchDecoder
-                decoder = seq2seq.BeamSearchDecoder(stacked_cell, self._embedding_helper, [1], initial_state=enc_state, beam_width=self._hps.beam_size, output_layer=projection_layer)
+                decoder_init_state = seq2seq.tile_batch(enc_state, multiplier=self._hps.beam_size) # shape (batch_size*beam_size,)
+                decoder = seq2seq.BeamSearchDecoder(cell=stacked_cell,
+                                                    embedding=lambda x: self._embedding_helper(x, z),
+                                                    start_tokens=tf.fill([self._hps.batch_size], 1),
+                                                    end_token=2,
+                                                    initial_state=decoder_init_state,
+                                                    beam_width=self._hps.beam_size,
+                                                    output_layer=projection_layer)
 
             # unroll the decoder
             outputs, _, _ = seq2seq.dynamic_decode(decoder, impute_finished=True, maximum_iterations=self._hps.max_dec_steps)
 
-        return outputs
+        if mode == tf.estimator.ModeKeys.PREDICT:
+            return outputs.predicted_ids
+        else:
+            return outputs.rnn_output
 
-    def _calc_losses(self, q_z, p_z, dec_outputs, anneal_rate):
+    def _calc_losses(self, q_z, p_z, logits):
         """ Adds ops to calculate losses for training 
         Args:
             q_z: The posterior distribution for calculating KL Divergence
             p_z: The prior distribution for calculating KL Divergence
-            decoder_outputs: The outputs of the decoder. whatever that may be. TODO: Figure out specifics of dec_outputs
+            logits: The outputs of the decoder. Shape (batch_size, seq_len, vsize)
             anneal_rate: Rate for KL Divergence annealing. Helps for training
         """
         return NotImplementedError
@@ -175,12 +195,13 @@ class RVAE(object):
         rand_unif_init = tf.random_uniform_initializer(-1.0,1.0, seed=123)
         rand_norm_init = tf.random_normal_initializer(stddev=0.001)
         trunc_norm_init = tf.truncated_normal_initializer(stddev=0.0001)
-        embedding_init = params['embedding_initializer']
+        if mode == tf.estimator.ModeKeys.TRAIN:
+            self._embedding_init = params['embedding_initializer']
 
         # embed all necessary input tensors
-        emb_src_inputs = self._embedding_layer(features['source_seq'], embedding_init)
+        emb_src_inputs = self._embedding_layer(features['source_seq'])
         if mode != tf.estimator.ModeKeys.PREDICT:
-            emb_tgt_inputs = self._embedding_layer(labels['target_seq'], embedding_init)
+            emb_tgt_inputs = self._embedding_layer(labels['target_seq'])
 
         # pass the embedded tensors to the source encoder
         src_fw_st, src_bw_st = self._add_source_encoder(emb_src_inputs, features['source_len'], self._hps.hidden_dim)
@@ -204,10 +225,12 @@ class RVAE(object):
 
         # TODO: Add decoder
         if mode == tf.estimator.ModeKeys.PREDICT:
-            dec_outputs = self._add_decoder(dec_init_state, self._hps.hidden_dim, self._hps.dec_layers, z, self._hps.keep_prob, trunc_norm_init, mode)
+            predicted_ids = self._add_decoder(dec_init_state, self._hps.hidden_dim, self._hps.dec_layers, z, self._hps.keep_prob, trunc_norm_init, mode)
         else:
-            dec_outputs = self._add_decoder(dec_init_state, self._hps.hidden_dim, self._hps.dec_layers, z, self._hps.keep_prob, trunc_norm_init, mode, (emb_tgt_inputs, labels['target_len']))
+            logits = self._add_decoder(dec_init_state, self._hps.hidden_dim, self._hps.dec_layers, z, self._hps.keep_prob, trunc_norm_init, mode, (emb_tgt_inputs, labels['target_len']))
 
         # TODO: Computes losses with KL annealing or something
+        if mode in [tf.estimator.ModeKeys.TRAIN, tf.estimator.ModeKeys.EVAL]:
+            losses = self._calc_losses(q_z, p_z, logits)
 
         return NotImplementedError
