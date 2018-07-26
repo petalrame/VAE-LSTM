@@ -118,12 +118,14 @@ class RVAE(object):
 
         # argument validation
         if mode == tf.estimator.ModeKeys.PREDICT:
-            assert train_inputs == None, 'Invalid input for predict mode. train_inputs is not None'
+            assert train_inputs == None, 'Invalid input for PREDICT mode. train_inputs is not None'
             assert keep_prob == 1.0, 'Invalid input for predict mode. keep_prob is not 1.0'
             assert self._hps.batch_size == 1, 'Invalid batch_size for inference'
-        else:
+        elif mode == tf.estimator.ModeKeys.TRAIN:
             assert len(train_inputs) == 2, 'Invalid number of arguments for train input'
             enc_dec_inputs, target_len = train_inputs
+        else:
+            assert keep_prob == 1.0, 'keep_prob should be 1.0 for EVAL mode'
 
         with tf.variable_scope('decoder'):
             dec_cells = [tf.nn.rnn_cell.LSTMCell(hidden_dim, state_is_tuple=True) for _ in range(num_layers)]
@@ -133,9 +135,9 @@ class RVAE(object):
             # add dropout
             stacked_cell = tf.nn.rnn_cell.DropoutWrapper(stacked_cell, input_keep_prob=keep_prob)
 
-            projection_layer = tf.layers.Dense(self._vsize)
+            projection_layer = tf.layers.Dense(self._vsize, use_bias=False)
 
-            if mode != tf.estimator.ModeKeys.PREDICT:
+            if mode == tf.estimator.ModeKeys.TRAIN:
                 # make inputs for decoder
                 [_,seq_len,_] = enc_dec_inputs.get_shape().as_list()
                 z = tf.tile(tf.expand_dims(z, 1), [1, seq_len, 1]) # (batch_size, seq_len, latent_dim)
@@ -158,19 +160,33 @@ class RVAE(object):
             # unroll the decoder
             outputs, _, _ = seq2seq.dynamic_decode(decoder, impute_finished=True, maximum_iterations=self._hps.max_dec_steps)
 
-        if mode == tf.estimator.ModeKeys.PREDICT:
-            return outputs.predicted_ids
-        else:
+        if mode == tf.estimator.ModeKeys.TRAIN:
             return outputs.rnn_output
+        else:
+            return outputs.predicted_ids
 
-    def _calc_losses(self, q_z, p_z, logits):
+    def _calc_losses(self, q_z, p_z, logits, targets, masks):
         """ Adds ops to calculate losses for training 
         Args:
             q_z: The posterior distribution for calculating KL Divergence
             p_z: The prior distribution for calculating KL Divergence
             logits: The outputs of the decoder. Shape (batch_size, seq_len, vsize)
+            targets: `Tensor` of target values for the loss. Of shape (batch_size, seq_len)
+            masks: `Tensor` of shape (batch_size, max_seq_len) of float type representing the padding mask
             anneal_rate: Rate for KL Divergence annealing. Helps for training
         """
+
+        # calculate crossentropy loss (batch_size)
+        r_loss = seq2seq.sequence_loss(logits=logits, labels=targets, weights=masks, average_across_batch=False)
+
+        # calculate KLD (batch_size,)
+        kl_div = ds.kl_divergence(q_z, p_z)
+
+        # calculate total loss
+        loss = tf.reduce_mean(r_loss) + 42 * tf.reduce_mean(kl_div) # TODO: Change this so that it incorporates KL annealing
+
+
+
         return NotImplementedError
 
     def model_fn(self, features, labels, mode, params):
@@ -185,6 +201,7 @@ class RVAE(object):
             Contains:
                 'target_seq': Target sequence of (batch_size, max_len_seq)
                 'target_len': Target lengths of shape (batch_size,)
+                'decoder_tgt': Target sequence of (batch_size, max_len_seq). Last shape is same as target_seq
             mode: An instance of tf.estimator.ModeKeys to be used for calls to train() and evaluate()
             params: Any additional configuration needed    
         Returns:
@@ -219,18 +236,24 @@ class RVAE(object):
         z = q_z.sample() # shape (batch_size, latent_dim)
 
         # add the prior distribution for loss
-        p_z = ds.MultivariateNormalDiag(loc=[0.]*self._hps.latent_dim,scale_diag=[1.]*self._hps.latent_dim)
+        if mode != tf.estimator.ModeKeys.PREDICT:
+            p_z = ds.MultivariateNormalDiag(loc=[0.]*self._hps.latent_dim,scale_diag=[1.]*self._hps.latent_dim)
 
+        # transform encoder state shape to (batch_size, hidden_dim)
         dec_init_state = tf.layers.dense(src_enc_state, self._hps.hidden_dim, kernel_initializer=rand_unif_init)
 
-        # TODO: Add decoder
-        if mode == tf.estimator.ModeKeys.PREDICT:
-            predicted_ids = self._add_decoder(dec_init_state, self._hps.hidden_dim, self._hps.dec_layers, z, self._hps.keep_prob, trunc_norm_init, mode)
-        else:
+        # add the decoder for the given mode
+        if mode == tf.estimator.ModeKeys.TRAIN:
             logits = self._add_decoder(dec_init_state, self._hps.hidden_dim, self._hps.dec_layers, z, self._hps.keep_prob, trunc_norm_init, mode, (emb_tgt_inputs, labels['target_len']))
+            training_logits = tf.identity(logits, name='logits')
+        else:
+            predicted_ids = self._add_decoder(dec_init_state, self._hps.hidden_dim, self._hps.dec_layers, z, self._hps.keep_prob, trunc_norm_init, mode)
+            inference_logits = tf.identity(predicted_ids, name='predictions')
+            # TODO: find actual output shape for these logits
 
         # TODO: Computes losses with KL annealing or something
-        if mode in [tf.estimator.ModeKeys.TRAIN, tf.estimator.ModeKeys.EVAL]:
-            losses = self._calc_losses(q_z, p_z, logits)
+        if mode != tf.estimator.ModeKeys.PREDICT:
+            masks = tf.sequence_mask(labels['target_len'], dtype=tf.float32, name='masks')
+            losses = self._calc_losses(q_z, p_z, training_logits, labels['decoder_tgt'], masks)
 
         return NotImplementedError
