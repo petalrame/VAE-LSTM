@@ -44,6 +44,25 @@ class RVAE(object):
 
         return next_dec_input
 
+    def _word_dropout(self, dec_inputs, tgt_len, keep_prob):
+        """ Creates modified decoder input that has some words in the train input replaced with the UNK token(id==3)
+        Args:
+            dec_inputs: `Tensor` of shape (batch_size, max_dec_seq_len, emb_dim) sentences starting with START token(id==1)
+              used for conditioning the decoder
+            tgt_len: `Tensor` of shape (batch_size,) containing the sequence lengths along each batch entry
+            keep_prob: `float` used to determine the amount of tokens to keep
+        Returns:
+            A tensor with the same shape as dec_inputs with certain tokens in each batch_size replaced with UNK
+            according to some keep_prob
+        """
+
+        # TODO: Implement word dropout used for training. Decide if using regular dropout to inputs or 
+        # creating a dropout_mask then replacing the selected ids to be converted to UNK token
+        # First use tf.sequence_mask to generate a mask of actual words in batch.
+        # The above is also the padding_mask which is similarly used for computing loss.
+        # Then take slices of the dropout_mask, to compute dropout 
+
+        return NotImplementedError
 
     def _add_source_encoder(self, input, seq_len, hidden_dim):
         """ Adds a single-layer bidirectional LSTM encoder to parse the original sentence(source_seq)
@@ -95,7 +114,7 @@ class RVAE(object):
 
         return posterior
 
-    def _add_decoder(self, enc_state, hidden_dim, num_layers, z, keep_prob, mode, initializer, train_inputs=None):
+    def _add_decoder(self, enc_state, hidden_dim, num_layers, z, keep_prob, mode, initializer, sample_prob=0.0, train_inputs=None):
         """ Creates a decoder to produce outputs 
         Args: 
             enc_state: `Tensor`, Final enc_state after linear layer of shape (batch_size, hidden_dim).
@@ -106,6 +125,9 @@ class RVAE(object):
             keep_prob: `float` 1-dropout rate for dropout
             mode: `tf.estimator.ModeKeys` specifies the mode and determines what ops to add to the graph
             initializer: Initializer for the projection layer
+            sample_prob: `float`, Affects the sampling during train and eval modes. When 0.0(Default) the output of the previous decoder cell is not sampled,
+              so the target seq is used as input with shape (batch_size, emb_dim+latent_dim), this is because input at each t is a `TensorArray`. When performing
+              evaluation, the sample_prob should be 1.0 to read output at each t.
             train_inputs: A tuple of `Tensor`s that specify inputs for the decoder during training. If in prediction mode, this should be None.
             Contains:
               enc_dec_inputs: Inputs for the decoder of shape (batch_size, max_seq_len, emb_dim)
@@ -119,29 +141,32 @@ class RVAE(object):
         # argument validation
         if mode == tf.estimator.ModeKeys.PREDICT:
             assert train_inputs == None, 'Invalid input for PREDICT mode. train_inputs is not None'
-            assert keep_prob == 1.0, 'Invalid input for predict mode. keep_prob is not 1.0'
             assert self._hps.batch_size == 1, 'Invalid batch_size for inference'
         elif mode == tf.estimator.ModeKeys.TRAIN:
             assert len(train_inputs) == 2, 'Invalid number of arguments for train input'
+            assert sample_prob == 0.0, 'Invalid sample_prob for TRAIN mode. Should be 0.0'
             enc_dec_inputs, target_len = train_inputs
         else:
-            assert keep_prob == 1.0, 'keep_prob should be 1.0 for EVAL mode'
+            assert sample_prob == 1.0, 'Invalid sample_prob for EVAL mode. Should be 1.0'
+            enc_dec_inputs, target_len = train_inputs
 
         with tf.variable_scope('decoder'):
-            dec_cells = [tf.nn.rnn_cell.LSTMCell(hidden_dim, state_is_tuple=True) for _ in range(num_layers)]
+            # TODO: properly add dropout (need to replace some enc_dec_inputs elements with PAD token ID)
+            if mode == tf.estimator.ModeKeys.TRAIN:
+                enc_dec_inputs = self._word_dropout(enc_dec_inputs, target_len, keep_prob)
 
+            # basic stacked RNN of 2 layers
+            dec_cells = [tf.nn.rnn_cell.LSTMCell(hidden_dim, state_is_tuple=True) for _ in range(num_layers)]
             stacked_cell = tf.nn.rnn_cell.MultiRNNCell(dec_cells)
 
-            # add dropout
-            stacked_cell = tf.nn.rnn_cell.DropoutWrapper(stacked_cell, input_keep_prob=keep_prob)
-
+            # add projection layer to create unnormalized logits
             projection_layer = tf.layers.Dense(self._vsize, use_bias=False)
 
-            if mode == tf.estimator.ModeKeys.TRAIN:
+            if mode != tf.estimator.ModeKeys.PREDICT:
                 # make inputs for decoder
                 [_,seq_len,_] = enc_dec_inputs.get_shape().as_list()
                 z = tf.tile(tf.expand_dims(z, 1), [1, seq_len, 1]) # (batch_size, seq_len, latent_dim)
-                helper = seq2seq.ScheduledOutputTrainingHelper(enc_dec_inputs, target_len, sampling_probability=0.0, auxiliary_inputs=z)
+                helper = seq2seq.ScheduledOutputTrainingHelper(enc_dec_inputs, target_len, sampling_probability=sample_prob, auxiliary_inputs=z)
                 # at each t, the shape of the input will be (batch_size, latent_dim+emb_dim) after concat
                 decoder = seq2seq.BasicDecoder(cell=stacked_cell,
                                                helper=helper,
@@ -170,13 +195,13 @@ class RVAE(object):
         Args:
             q_z: The posterior distribution for calculating KL Divergence
             p_z: The prior distribution for calculating KL Divergence
-            logits: The outputs of the decoder. Shape (batch_size, seq_len, vsize)
-            targets: `Tensor` of target values for the loss. Of shape (batch_size, seq_len)
-            masks: `Tensor` of shape (batch_size, max_seq_len) of float type representing the padding mask
+            logits: The outputs of the decoder. Shape (batch_size, tgt_max_seq_len, vsize)
+            targets: `Tensor` of target values for the loss. Of shape (batch_size, tgt_max_seq_len)
+            masks: `Tensor` of shape (batch_size, tgt_max_seq_len) of float type representing the padding mask
             anneal_rate: Rate for KL Divergence annealing. Helps for training
         """
 
-        # calculate crossentropy loss (batch_size)
+        # calculate crossentropy loss (batch_size,)
         r_loss = seq2seq.sequence_loss(logits=logits, labels=targets, weights=masks, average_across_batch=False)
 
         # calculate KLD (batch_size,)
@@ -249,7 +274,6 @@ class RVAE(object):
         else:
             predicted_ids = self._add_decoder(dec_init_state, self._hps.hidden_dim, self._hps.dec_layers, z, self._hps.keep_prob, trunc_norm_init, mode)
             inference_logits = tf.identity(predicted_ids, name='predictions')
-            # TODO: find actual output shape for these logits
 
         # TODO: Computes losses with KL annealing or something
         if mode != tf.estimator.ModeKeys.PREDICT:
