@@ -56,11 +56,12 @@ class RVAE(object):
             according to some keep_prob
         """
 
-        # TODO: Implement word dropout used for training. Decide if using regular dropout to inputs or 
-        # creating a dropout_mask then replacing the selected ids to be converted to UNK token
+        # TODO: Implement word dropout used for training. 
+        # Create a dropout_mask then replace the selected ids with UNK token
         # First use tf.sequence_mask to generate a mask of actual words in batch.
         # The above is also the padding_mask which is similarly used for computing loss.
         # Then take slices of the dropout_mask, to compute dropout 
+        # FIND OUT HOW DROPOUT COMPUTES DROPOUT ON INPUT SEQ TO DECODER
 
         return NotImplementedError
 
@@ -208,7 +209,7 @@ class RVAE(object):
         kl_div = ds.kl_divergence(q_z, p_z)
 
         # calculate total loss
-        loss = tf.reduce_mean(r_loss) + 42 * tf.reduce_mean(kl_div) # TODO: Change this so that it incorporates KL annealing
+        loss = tf.reduce_mean(r_loss, name='r_loss') + 42 * tf.reduce_mean(kl_div, name='kl_loss') # TODO: Change this so that it incorporates KL annealing
 
 
 
