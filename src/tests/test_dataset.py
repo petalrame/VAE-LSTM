@@ -22,12 +22,13 @@ def test_train_input_fn_type(dataset):
     """ Test the handler capability to create dataset from tfrecord file format
     """
 
-    iter, next = dataset.train_input_fn(TRAIN_RECORD, 3)
+    ds = dataset.train_input_fn(TRAIN_RECORD, 3)
+    iterator = ds.make_initializable_iterator()
 
     with tf.Session() as sess:
-        sess.run(iter.initializer)
+        sess.run(iterator.initializer)
         for _ in range(1):
-            features, labels = sess.run(next)
+            features, labels = sess.run(iterator.get_next())
             print("features:", features)
             print("labels:", labels)
             assert isinstance(features, dict)
@@ -37,10 +38,12 @@ def test_train_input_fn_structure(dataset):
     """ Test the handler capability to create dataset from tfrecord file format
     """
 
-    iter, next = dataset.train_input_fn(TRAIN_RECORD, 3)
+    ds = dataset.train_input_fn(TRAIN_RECORD, 3)
+    iterator = ds.make_initializable_iterator()
+    next = iterator.get_next()
 
     with tf.Session() as sess:
-        sess.run(iter.initializer)
+        sess.run(iterator.initializer)
         for _ in range(1):
             features, labels = sess.run(next)
             assert len(features["source_seq"]) == 3
