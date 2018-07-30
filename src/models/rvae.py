@@ -44,26 +44,44 @@ class RVAE(object):
 
         return next_dec_input
 
-    def _word_dropout(self, dec_inputs, tgt_len, keep_prob):
+    def _word_dropout(self, seq, len, keep_prob):
         """ Creates modified decoder input that has some words in the train input replaced with the UNK token(id==3)
         Args:
-            dec_inputs: `Tensor` of shape (batch_size, max_dec_seq_len, emb_dim) sentences starting with START token(id==1)
-              used for conditioning the decoder
-            tgt_len: `Tensor` of shape (batch_size,) containing the sequence lengths along each batch entry
+            seq: `Tensor` of shape (max_dec_seq_len,) containing a sequence for one batch entry
+            len: `Tensor` containing the sequence length for a batch entry
             keep_prob: `float` used to determine the amount of tokens to keep
         Returns:
             A tensor with the same shape as dec_inputs with certain tokens in each batch_size replaced with UNK
             according to some keep_prob
         """
+        with tf.variable_scope('dropout'):
+            # cast inputs to int64
+            seq = tf.cast(seq, dtype=tf.int32)
+            len = tf.cast(len, dtype=tf.int32)
 
-        # TODO: Implement word dropout used for training. 
-        # Create a dropout_mask then replace the selected ids with UNK token
-        # First use tf.sequence_mask to generate a mask of actual words in batch.
-        # The above is also the padding_mask which is similarly used for computing loss.
-        # Then take slices of the dropout_mask, to compute dropout 
-        # FIND OUT HOW DROPOUT COMPUTES DROPOUT ON INPUT SEQ TO DECODER
+            # draw Bernoulli distribution
+            p = tf.distributions.Bernoulli(probs=keep_prob)
 
-        return NotImplementedError
+            # sample distribution
+            sub_mask = p.sample(len) # shape (len) of independant Bernoulli trials
+            d_mask = tf.concat([sub_mask, tf.zeros(tf.size(seq)-len, dtype=tf.int32)], 0) #dropout mask
+            d_mask = tf.multiply(seq, d_mask) # set all to-be-changed indices to 0
+
+            # get the indices with 0
+            indices = tf.reshape(tf.where(tf.equal(sub_mask, 0)), [-1,1]) # get indices of 0 positions
+            indices = tf.cast(indices, tf.int32) # cast to tf.int32 for op compatibility
+            values = tf.fill([tf.size(indices)], 3) # get tensor of same shape of indices
+
+            seq = tf.scatter_nd(indices=indices, updates=values, shape=tf.shape(seq)) # create inverse mask(all zeroes except for the idx(s) to replace)
+
+            # add mask back to the inv_mask
+            seq = tf.add(d_mask, seq)
+
+            # cast outputs back to tf.int64
+            seq = tf.cast(seq, dtype=tf.int64)
+            len = tf.cast(len, dtype=tf.int64)
+
+        return (seq, len)
 
     def _add_source_encoder(self, input, seq_len, hidden_dim):
         """ Adds a single-layer bidirectional LSTM encoder to parse the original sentence(source_seq)
@@ -152,10 +170,6 @@ class RVAE(object):
             enc_dec_inputs, target_len = train_inputs
 
         with tf.variable_scope('decoder'):
-            # TODO: properly add dropout (need to replace some enc_dec_inputs elements with PAD token ID)
-            if mode == tf.estimator.ModeKeys.TRAIN:
-                enc_dec_inputs = self._word_dropout(enc_dec_inputs, target_len, keep_prob)
-
             # basic stacked RNN of 2 layers
             dec_cells = [tf.nn.rnn_cell.LSTMCell(hidden_dim, state_is_tuple=True) for _ in range(num_layers)]
             stacked_cell = tf.nn.rnn_cell.MultiRNNCell(dec_cells)
@@ -225,7 +239,7 @@ class RVAE(object):
             labels: A Tensor or doct of Tensors to be used as labels. Should be blank for
             predict mode.
             Contains:
-                'target_seq': Target sequence of (batch_size, max_len_seq)
+                'target_seq': Target sequence of (batch_size, max_len_seq) used for decoder input
                 'target_len': Target lengths of shape (batch_size,)
                 'decoder_tgt': Target sequence of (batch_size, max_len_seq). Last shape is same as target_seq
             mode: An instance of tf.estimator.ModeKeys to be used for calls to train() and evaluate()
@@ -240,11 +254,12 @@ class RVAE(object):
         trunc_norm_init = tf.truncated_normal_initializer(stddev=0.0001)
         if mode == tf.estimator.ModeKeys.TRAIN:
             self._embedding_init = params['embedding_initializer']
+            # apply word dropout, replacing 0.3 words in decoder input with UNK token
+            dec_input,_ = tf.map_fn(lambda x: self._word_dropout(x[0], x[1], self._hps.keep_prob), (labels['target_seq'], labels['target_len']))
+            emb_tgt_inputs = self._embedding_layer(dec_input)
 
         # embed all necessary input tensors
         emb_src_inputs = self._embedding_layer(features['source_seq'])
-        if mode != tf.estimator.ModeKeys.PREDICT:
-            emb_tgt_inputs = self._embedding_layer(labels['target_seq'])
 
         # pass the embedded tensors to the source encoder
         src_fw_st, src_bw_st = self._add_source_encoder(emb_src_inputs, features['source_len'], self._hps.hidden_dim)

@@ -12,3 +12,7 @@ data/raw/*
 
 # Don't exclude .gitkeep
 !.gitkeep
+
+# exclude .pyc
+#**/__pycache__
+#*.pyc
