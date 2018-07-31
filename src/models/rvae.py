@@ -92,7 +92,6 @@ class RVAE(object):
         Returns:
             fw_state, bw_state: Forward and backward states of the encoder with shape (batch_size, hidden_dim)
         """
-        #TODO: Add highway connections(you will have to make your own)
         with tf.variable_scope('source_encoder'):
             cell_fw = tf.nn.rnn_cell.LSTMCell(hidden_dim, state_is_tuple=True)
             cell_bw = tf.nn.rnn_cell.LSTMCell(hidden_dim, state_is_tuple=True)
@@ -110,7 +109,6 @@ class RVAE(object):
         Returns:
             fwd_state, bw_state: Forward and backward states of the encoder with shape (batch_size, hidden_dim)
         """
-        #TODO: Add highway linear layers
         with tf.variable_scope('target_encoder'):
             cell_fw = tf.nn.rnn_cell.LSTMCell(hidden_dim, state_is_tuple=True)
             cell_bw = tf.nn.rnn_cell.LSTMCell(hidden_dim, state_is_tuple=True)
@@ -161,11 +159,14 @@ class RVAE(object):
         if mode == tf.estimator.ModeKeys.PREDICT:
             assert train_inputs == None, 'Invalid input for PREDICT mode. train_inputs is not None'
             assert self._hps.batch_size == 1, 'Invalid batch_size for inference'
+            assert keep_prob == 1.0, 'Invalid keep_prob, should be 1.0 for eval and predict'
         elif mode == tf.estimator.ModeKeys.TRAIN:
             assert len(train_inputs) == 2, 'Invalid number of arguments for train input'
             assert sample_prob == 0.0, 'Invalid sample_prob for TRAIN mode. Should be 0.0'
             enc_dec_inputs, target_len = train_inputs
+            assert keep_prob == 0.7, 'Invalid keep_prob, should be 0.7 for training. If you want to set another value change this.'
         else:
+            assert keep_prob == 1.0, 'Invalid keep_prob, should be 1.0 for eval and predict'
             assert sample_prob == 1.0, 'Invalid sample_prob for EVAL mode. Should be 1.0'
             enc_dec_inputs, target_len = train_inputs
 
@@ -173,6 +174,9 @@ class RVAE(object):
             # basic stacked RNN of 2 layers
             dec_cells = [tf.nn.rnn_cell.LSTMCell(hidden_dim, state_is_tuple=True) for _ in range(num_layers)]
             stacked_cell = tf.nn.rnn_cell.MultiRNNCell(dec_cells)
+
+            if mode == tf.estimator.ModeKeys.TRAIN and not self._hps.use_wdrop:
+                stacked_cell = tf.nn.rnn_cell.DropoutWrapper(stacked_cell, input_keep_prob=keep_prob)
 
             # add projection layer to create unnormalized logits
             projection_layer = tf.layers.Dense(self._vsize, use_bias=False)
@@ -205,7 +209,7 @@ class RVAE(object):
         else:
             return outputs.predicted_ids
 
-    def _calc_losses(self, q_z, p_z, logits, targets, masks):
+    def _calc_losses(self, q_z, p_z, logits, targets, masks, mode):
         """ Adds ops to calculate losses for training 
         Args:
             q_z: The posterior distribution for calculating KL Divergence
@@ -213,21 +217,25 @@ class RVAE(object):
             logits: The outputs of the decoder. Shape (batch_size, tgt_max_seq_len, vsize)
             targets: `Tensor` of target values for the loss. Of shape (batch_size, tgt_max_seq_len)
             masks: `Tensor` of shape (batch_size, tgt_max_seq_len) of float type representing the padding mask
-            anneal_rate: Rate for KL Divergence annealing. Helps for training
+            mode: If in train mode, use global_step variable for kl_coeff, otherwise set kl_coeff to 1.0 
         """
+        with tf.variable_scope('loss'):
+            # calculate crossentropy loss (batch_size,)
+            r_loss = seq2seq.sequence_loss(logits=logits, labels=targets, weights=masks, average_across_batch=False)
 
-        # calculate crossentropy loss (batch_size,)
-        r_loss = seq2seq.sequence_loss(logits=logits, labels=targets, weights=masks, average_across_batch=False)
+            # calculate KLD (batch_size,)
+            kl_div = ds.kl_divergence(q_z, p_z)
 
-        # calculate KLD (batch_size,)
-        kl_div = ds.kl_divergence(q_z, p_z)
+            # calculate kl_coeff
+            if mode == tf.estimator.ModeKeys.TRAIN:
+                kl_coeff = 0.5*(tf.tanh((tf.to_float(self.global_step)-17520.0)/1000.0) + 1.0)
+            else:
+                kl_coeff = tf.constant([1.0], dtype=tf.float32)
 
-        # calculate total loss
-        loss = tf.reduce_mean(r_loss, name='r_loss') + 42 * tf.reduce_mean(kl_div, name='kl_loss') # TODO: Change this so that it incorporates KL annealing
+            # calculate total loss
+            loss = tf.reduce_mean(r_loss, name='r_loss') + kl_coeff*tf.reduce_mean(kl_div, name='kl_loss')
 
-
-
-        return NotImplementedError
+        return loss
 
     def model_fn(self, features, labels, mode, params):
         """ Builds the graph of the model being implemented 
@@ -255,8 +263,11 @@ class RVAE(object):
         if mode == tf.estimator.ModeKeys.TRAIN:
             self._embedding_init = params['embedding_initializer']
             # apply word dropout, replacing 0.3 words in decoder input with UNK token
-            dec_input,_ = tf.map_fn(lambda x: self._word_dropout(x[0], x[1], self._hps.keep_prob), (labels['target_seq'], labels['target_len']))
-            emb_tgt_inputs = self._embedding_layer(dec_input)
+            if self._hps.use_wdrop:
+                dec_input,_ = tf.map_fn(lambda x: self._word_dropout(x[0], x[1], self._hps.keep_prob), (labels['target_seq'], labels['target_len']))
+                emb_tgt_inputs = self._embedding_layer(dec_input)
+            else:
+                emb_tgt_inputs = self._embedding_layer(labels['target_seq'])
 
         # embed all necessary input tensors
         emb_src_inputs = self._embedding_layer(features['source_seq'])
@@ -291,9 +302,10 @@ class RVAE(object):
             predicted_ids = self._add_decoder(dec_init_state, self._hps.hidden_dim, self._hps.dec_layers, z, self._hps.keep_prob, trunc_norm_init, mode)
             inference_logits = tf.identity(predicted_ids, name='predictions')
 
-        # TODO: Computes losses with KL annealing or something
+        # calculate loss
         if mode != tf.estimator.ModeKeys.PREDICT:
+            self.global_step = tf.train.get_or_create_global_step() # initialize or get global step
             masks = tf.sequence_mask(labels['target_len'], dtype=tf.float32, name='masks')
-            losses = self._calc_losses(q_z, p_z, training_logits, labels['decoder_tgt'], masks)
+            losses = self._calc_losses(q_z, p_z, training_logits, labels['decoder_tgt'], masks, mode)
 
         return NotImplementedError
