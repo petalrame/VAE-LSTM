@@ -228,7 +228,7 @@ class RVAE(object):
 
             # calculate kl_coeff
             if mode == tf.estimator.ModeKeys.TRAIN:
-                kl_coeff = 0.5*(tf.tanh((tf.to_float(self.global_step)-17520.0)/1000.0) + 1.0)
+                kl_coeff = 0.5*(tf.tanh((tf.to_float(self.global_step)-17500.0)/1000.0) + 1.0)
             else:
                 kl_coeff = tf.constant([1.0], dtype=tf.float32)
 
