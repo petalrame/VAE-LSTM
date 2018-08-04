@@ -54,7 +54,7 @@ class RVAE(object):
             A tensor with the same shape as dec_inputs with certain tokens in each batch_size replaced with UNK
             according to some keep_prob
         """
-        with tf.variable_scope('dropout'):
+        with tf.variable_scope('word_dropout'):
             # cast inputs to int64
             seq = tf.cast(seq, dtype=tf.int32)
             len = tf.cast(len, dtype=tf.int32)
@@ -236,6 +236,13 @@ class RVAE(object):
             loss = tf.reduce_mean(r_loss, name='r_loss') + kl_coeff*tf.reduce_mean(kl_div, name='kl_loss')
 
         return loss
+
+    def _train_op(self, loss):
+        """ Adds ops to calculate gradients and perform backprop
+        Args:
+            loss: The scalar loss
+        Returns:
+        """
 
     def model_fn(self, features, labels, mode, params):
         """ Builds the graph of the model being implemented 
