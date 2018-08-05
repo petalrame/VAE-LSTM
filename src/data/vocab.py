@@ -1,6 +1,7 @@
 """ Prepare the data for creation of TFRecords """
 from __future__ import absolute_import, division, print_function
 
+import csv
 import io
 import os
 from collections import Counter, defaultdict
@@ -168,7 +169,7 @@ class Vocab(object):
         print("Writing vocab to file...")
 
         # sanity check the path
-        path = os.path.join(path, "vocab")
+        path = os.path.join(path, "vocab.tsv")
         if os.path.isfile(path):
             raise Exception('WARNING: There already exists a vocab file located at the specified path. If you want to create a new vocab delete/move the old one.')
 
@@ -185,12 +186,15 @@ class Vocab(object):
         for token, _ in freq_tokens:
             self.vocab[token]
 
-        with open(path, 'w') as writer:
+        with open(path, 'w') as vocab_tsv:
+            # write the first line
+            writer = csv.writer(vocab_tsv, delimiter='\t')
+            writer.writerow(['Word', 'ID'])
             for word, id_ in self.vocab.items():
                 # skip adding special tokens
                 if id_ < 4:
                     continue
-                writer.write(word + ' ' + str(id_) + '\n')
+                writer.writerow([word, id_])
 
         print("Finished writing to vocab")
 
@@ -208,7 +212,11 @@ class Vocab(object):
         print("Loading vocab at:", path)
 
         with open(path, 'r') as vocab_f:
-            for line in vocab_f:
+            vocab_f = csv.reader(vocab_f, delimiter='\t')
+            for idx, line in enumerate(vocab_f):
+                # skip the header
+                if idx == 0:
+                    continue
                 # check integrity of vocab file
                 pieces = line.split()
                 if len(pieces) != 2:
@@ -224,4 +232,3 @@ class Vocab(object):
                     raise Exception("The read word in the vocab does not match the ID it was given in the vocab file. Please check the vocab file.")
                 
         return
-

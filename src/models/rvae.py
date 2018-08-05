@@ -242,7 +242,9 @@ class RVAE(object):
         Args:
             loss: The scalar loss
         Returns:
+            TODO: FILL OUT
         """
+        return NotImplementedError
 
     def model_fn(self, features, labels, mode, params):
         """ Builds the graph of the model being implemented 
