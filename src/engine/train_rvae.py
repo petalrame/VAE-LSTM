@@ -97,6 +97,8 @@ def main(unused_argv):
     # call the model
     model = RVAE(hps, vsize)
 
+    # TODO: Make sure all hps have correct values for mode
+
     if FLAGS.mode == 'train':
         train_and_eval(model, ds)
     elif FLAGS.mode == 'eval':
