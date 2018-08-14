@@ -1,9 +1,12 @@
 """ Implementation of the Reccurrent Variational Autoencoder """
 from __future__ import absolute_import, division, print_function
 
-import tensorboard
+import os
+
 import tensorflow as tf
 from tensorflow import layers
+from tensorflow.contrib.tensorboard.plugins import projector #pylint: disable=E0611
+
 
 ds = tf.contrib.distributions
 seq2seq = tf.contrib.seq2seq
@@ -13,20 +16,45 @@ FLAGS = tf.app.flags.FLAGS
 class RVAE(object):
     """ Builds the model graph for different modes(train, eval, predict) """
     def __init__(self, hps, vocab_size):
-        self._hps = hps
+        self._hps = hps # contains all hps for the model
         self._vsize = vocab_size
 
-    def _embedding_layer(self, input):
+    def _embedding_layer(self, input, vis=False):
         """ Adds the embedding layer that is used for the encoder and decoder inputs
         Args:
             input: `Tensor` of shape (batch_size, max_seq_len)
+            vis: `Boolean` that tells this layer whether or not to create the projector config for Tensorboard
         Returns:
             emb_tensor: `Tensor` of size (batch_size, max_seq_len, emb_dim)
         """
         with tf.variable_scope('embedding_layer', reuse=tf.AUTO_REUSE):
-            embedding = tf.get_variable('embedding_tensor', [self._vsize, self._hps.emb_dim], dtype=tf.float32, initializer=self._embedding_init) # initialize with pretrained word vecs
-
+            embedding = tf.get_variable('embedding_tensor',
+                                        [self._vsize, self._hps.emb_dim],
+                                        dtype=tf.float32,
+                                        initializer=self._embedding_init) # initialize with pretrained word vecs
+            if vis: 
+                self._add_emb_vis(embedding)
+            
         return tf.nn.embedding_lookup(embedding, input)
+
+    def _add_emb_vis(self, embedding_var):
+        """ Do some setup so that we can view word embeddings in Tensorboard, as described here:
+        https://www.tensorflow.org/guide/embedding
+        Makes the projector config point to the metadata file(vocab file in TSV format)
+        Args:
+            embedding_var: The the variable to be embedded
+        """
+        # Make the paths for the summary writer
+        train_dir = os.path.join(self._hps.model_dir, "train")
+        vocab_path = self._hps.vocab_path
+        
+        # tensorboard things to visualize the embeddings
+        summary_writer = tf.summary.FileWriter(train_dir)
+        config = projector.ProjectorConfig()
+        embedding = config.embeddings.add() #pylint: disable=E1101
+        embedding.tensor_name = embedding_var.name
+        embedding.metadata_path = vocab_path
+        projector.visualize_embeddings(summary_writer, config)
 
     def _embedding_helper(self, input, z):
         """ A helper for beam search decoding during predict mode
@@ -112,7 +140,14 @@ class RVAE(object):
         with tf.variable_scope('target_encoder'):
             cell_fw = tf.nn.rnn_cell.LSTMCell(hidden_dim, state_is_tuple=True)
             cell_bw = tf.nn.rnn_cell.LSTMCell(hidden_dim, state_is_tuple=True)
-            (_, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(cell_fw, cell_bw, input, initial_state_fw=fw_st, initial_state_bw=bw_st, dtype=tf.float32, sequence_length=seq_len, swap_memory=True)
+            (_, (fw_st, bw_st)) = tf.nn.bidirectional_dynamic_rnn(cell_fw,
+                                                                  cell_bw,
+                                                                  input,
+                                                                  initial_state_fw=fw_st,
+                                                                  initial_state_bw=bw_st,
+                                                                  dtype=tf.float32,
+                                                                  sequence_length=seq_len,
+                                                                  swap_memory=True)
         return fw_st, bw_st
 
     def _make_posterior(self, enc_state, latent_dim, initializaer):
@@ -151,7 +186,7 @@ class RVAE(object):
               target_len: Length of target sequences of shape (batch_size,)
         Returns:
             outputs: Differs from train/eval and predict modes
-              PREDICT: Outputs predicted_ids of (batch_size, steps_decoded, beam_size)
+              PREDICT: Outputs predicted_ids of (batch_size, steps_decoded[seq_len], beam_size)
               TRAIN/EVAL: Outputs logits of (batch_size, seq_len, vsize)
         """
 
@@ -185,7 +220,10 @@ class RVAE(object):
                 # make inputs for decoder
                 [_,seq_len,_] = enc_dec_inputs.get_shape().as_list()
                 z = tf.tile(tf.expand_dims(z, 1), [1, seq_len, 1]) # (batch_size, seq_len, latent_dim)
-                helper = seq2seq.ScheduledOutputTrainingHelper(enc_dec_inputs, target_len, sampling_probability=sample_prob, auxiliary_inputs=z)
+                helper = seq2seq.ScheduledOutputTrainingHelper(enc_dec_inputs,
+                                                               target_len,
+                                                               sampling_probability=sample_prob,
+                                                               auxiliary_inputs=z)
                 # at each t, the shape of the input will be (batch_size, latent_dim+emb_dim) after concat
                 decoder = seq2seq.BasicDecoder(cell=stacked_cell,
                                                helper=helper,
@@ -222,9 +260,11 @@ class RVAE(object):
         with tf.variable_scope('loss'):
             # calculate crossentropy loss (batch_size,)
             r_loss = seq2seq.sequence_loss(logits=logits, labels=targets, weights=masks, average_across_batch=False)
+            r_loss = tf.reduce_mean(r_loss, name='r_loss')
 
             # calculate KLD (batch_size,)
             kl_div = ds.kl_divergence(q_z, p_z)
+            kl_div = tf.reduce_mean(kl_div, name='kl_loss')
 
             # calculate kl_coeff
             if mode == tf.estimator.ModeKeys.TRAIN:
@@ -233,18 +273,31 @@ class RVAE(object):
                 kl_coeff = tf.constant([1.0], dtype=tf.float32)
 
             # calculate total loss
-            loss = tf.reduce_mean(r_loss, name='r_loss') + kl_coeff*tf.reduce_mean(kl_div, name='kl_loss')
+            loss = r_loss + kl_coeff*kl_div
 
-        return loss
+        # make dict for scalar summaries
+        summaries = {
+            'loss/r_loss': r_loss,
+            'loss/kl_loss': kl_div,
+            'loss/kl_coeff': kl_coeff,
+            'loss/loss': loss
+        }
 
-    def _train_op(self, loss):
+        return loss, summaries
+
+    def _train_op(self, loss, lr):
         """ Adds ops to calculate gradients and perform backprop
         Args:
             loss: The scalar loss
+            lr: The learning rate
         Returns:
-            TODO: FILL OUT
+            train_op: An op used for the train EstimatorSpec
         """
-        return NotImplementedError
+        # make optimizer
+        optimizer = tf.train.AdamOptimizer(lr)
+        train_op = optimizer.minimize(loss, global_step=tf.train.get_global_step())
+
+        return train_op
 
     def model_fn(self, features, labels, mode, params):
         """ Builds the graph of the model being implemented 
@@ -266,7 +319,7 @@ class RVAE(object):
             needs.
         """
         # create some global initializers
-        rand_unif_init = tf.random_uniform_initializer(-1.0,1.0, seed=123)
+        rand_unif_init = tf.random_uniform_initializer(-1.0, 1.0, seed=123)
         rand_norm_init = tf.random_normal_initializer(stddev=0.001)
         trunc_norm_init = tf.truncated_normal_initializer(stddev=0.0001)
         if mode == tf.estimator.ModeKeys.TRAIN:
@@ -274,9 +327,9 @@ class RVAE(object):
             # apply word dropout, replacing 0.3 words in decoder input with UNK token
             if self._hps.use_wdrop:
                 dec_input,_ = tf.map_fn(lambda x: self._word_dropout(x[0], x[1], self._hps.keep_prob), (labels['target_seq'], labels['target_len']))
-                emb_tgt_inputs = self._embedding_layer(dec_input)
+                emb_tgt_inputs = self._embedding_layer(dec_input, vis=True)
             else:
-                emb_tgt_inputs = self._embedding_layer(labels['target_seq'])
+                emb_tgt_inputs = self._embedding_layer(labels['target_seq'], vis=True)
 
         # embed all necessary input tensors
         emb_src_inputs = self._embedding_layer(features['source_seq'])
@@ -305,16 +358,41 @@ class RVAE(object):
 
         # add the decoder for the given mode
         if mode == tf.estimator.ModeKeys.TRAIN:
-            logits = self._add_decoder(dec_init_state, self._hps.hidden_dim, self._hps.dec_layers, z, self._hps.keep_prob, trunc_norm_init, mode, (emb_tgt_inputs, labels['target_len']))
+            logits = self._add_decoder(dec_init_state,
+                                       self._hps.hidden_dim,
+                                       self._hps.dec_layers,
+                                       z,
+                                       self._hps.keep_prob,
+                                       trunc_norm_init,
+                                       mode,
+                                       (emb_tgt_inputs, labels['target_len']))
             training_logits = tf.identity(logits, name='logits')
         else:
-            predicted_ids = self._add_decoder(dec_init_state, self._hps.hidden_dim, self._hps.dec_layers, z, self._hps.keep_prob, trunc_norm_init, mode)
-            inference_logits = tf.identity(predicted_ids, name='predictions')
+            predicted_ids = self._add_decoder(dec_init_state,
+                                              self._hps.hidden_dim,
+                                              self._hps.dec_layers,
+                                              z,
+                                              self._hps.keep_prob,
+                                              trunc_norm_init,
+                                              mode)
+            inference_logits = tf.transpose(predicted_ids, perm=[2, 0, 1], name='predictions') # shape (beam_size, batch_size, seq_len)
 
-        # calculate loss
+        # return the appropriate estimator spec
         if mode != tf.estimator.ModeKeys.PREDICT:
+            # calculate the loss
             self.global_step = tf.train.get_or_create_global_step() # initialize or get global step
             masks = tf.sequence_mask(labels['target_len'], dtype=tf.float32, name='masks')
-            losses = self._calc_losses(q_z, p_z, training_logits, labels['decoder_tgt'], masks, mode)
-
-        return NotImplementedError
+            loss, summary = self._calc_losses(q_z, p_z, training_logits, labels['decoder_tgt'], masks, mode)
+            
+            # add the summaries to tensorbaord
+            for n, t in summary.items():
+                tf.summary.scalar(n, t)
+            
+            # finish returning the estimator specs for train and eval
+            if mode == tf.estimator.ModeKeys.TRAIN:
+                train_op = self._train_op(loss, self._hps.lr)
+                return tf.estimator.EstimatorSpec(mode, loss=loss, train_op=train_op)
+            else:
+                return tf.estimator.EstimatorSpec(mode, loss=loss)
+        else:
+            return tf.estimator.EstimatorSpec(mode, predictions=inference_logits[0])
