@@ -153,7 +153,7 @@ class Dataset(object):
 
         return dataset
 
-    def predict_input_fn(self, path, batch_size=None):
+    def predict_input_fn(self, path, batch_size=1):
         """ Used to shape input for predict mode
         Args:
             path: Path to the data to be read
@@ -161,7 +161,29 @@ class Dataset(object):
         Returns:
             dataset: A tf.data.Dataset where the tuple returned is features, _
         """
-        return NotImplementedError
+        if path is not None:
+            assert batch_size is not None, "Error! If path is provided, batch size must be too!"
+
+        if not os.path.isfile(path):
+            raise Exception("Error! The path provided is not a file.")
+        
+        def _parse(ex):
+            """ Parses the input string. Tokenizes and maps to seq of ID
+            """
+            ex = self.vocab.prep_seq(ex)
+            ex_len = len(ex)
+            return ({"source_seq": ex, "source_len": ex_len})
+
+        # create the dataset and map it
+        dataset = tf.data.TextLineDataset([path]).skip(1).map(_parse, num_parallel_calls=5) # there should be a header in the text file
+
+        # add batching
+        padded_shapes = ({"source_seq": tf.TensorShape([None]), # pads to largest sentence in batch
+        "source_len": tf.TensorShape([])})
+
+        dataset = dataset.padded_batch(batch_size, padded_shapes=padded_shapes) 
+
+        return dataset
 
 
 

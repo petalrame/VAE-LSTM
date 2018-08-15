@@ -120,18 +120,27 @@ class Vocab(object):
         
         return text
 
-    def read_embeddings(self, path):
+    def read_embeddings(self, path, load_np=True):
         """ Reads word embeddings from file that are saved in the FastText format
         Args:
             path: Path to the embedding file
+            load_np: Load np array
         Returns:
-            embedding_matrix: A numpy array of (vocab_size, embedding_dim)
+            embedding_initializer: An initializer for pre-trained embeddings
         """
 
         if not os.path.isfile(path):
             raise Exception('ERROR! Filepath is not a file')
 
         print("Reading embeddings from:", path)
+
+        def embed_initializer(shape=None, dtype=tf.float32, partition_info=None):
+            assert dtype is tf.float32
+            return embedding_matrix
+
+        if load_np:
+            embedding_matrix = np.load("/home/tldr/Projects/models/current/VAE-LSTM/data/external/emb_matrix.npy")
+            return embed_initializer
 
         fin = io.open(path, 'r', encoding='utf-8', newline='\n', errors='ignore')
         _, dim = map(int, fin.readline().split())
@@ -140,11 +149,7 @@ class Vocab(object):
         embeddings = {}
         for line in fin:
             tokens = line.rstrip().split(' ')
-            embeddings[tokens[0]] = map(float, tokens[1:])
-
-        def embed_initializer(shape=None, dtype=tf.float32, partition_info=None):
-            assert dtype is tf.float32
-            return embedding_matrix
+            embeddings[tokens[0]] = np.asarray(tokens[1:], dtype='float32')
 
         # turn the embeddings dict into a numpy array
         vsize = len(self.vocab)
@@ -153,6 +158,9 @@ class Vocab(object):
             v = embeddings.get(w)
             if v is not None and i < vsize:
                 embedding_matrix[i] = v
+
+        # save to numpy array format
+        np.save("/home/tldr/Projects/models/current/VAE-LSTM/data/external/emb_matrix.npy", embedding_matrix)
 
         return embed_initializer
 
@@ -217,18 +225,13 @@ class Vocab(object):
                 # skip the header
                 if idx == 0:
                     continue
-                # check integrity of vocab file
-                pieces = line.split()
-                if len(pieces) != 2:
-                    print("Line %d is formated incorrectly\n" % line)
-                    continue
-                word = pieces[0]
+                word = line[0]
                 if word in self.vocab:
                     raise Exception("Duplicate word %s found in vocab" % word)
 
                 # add the word to the vocab at the same ID(hopefully)
                 self.vocab[word]
-                if self.vocab[word] != int(pieces[1]):
+                if self.vocab[word] != int(line[1]):
                     raise Exception("The read word in the vocab does not match the ID it was given in the vocab file. Please check the vocab file.")
                 
         return

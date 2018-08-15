@@ -193,13 +193,12 @@ class RVAE(object):
         # argument validation
         if mode == tf.estimator.ModeKeys.PREDICT:
             assert train_inputs == None, 'Invalid input for PREDICT mode. train_inputs is not None'
-            assert self._hps.batch_size == 1, 'Invalid batch_size for inference'
             assert keep_prob == 1.0, 'Invalid keep_prob, should be 1.0 for eval and predict'
         elif mode == tf.estimator.ModeKeys.TRAIN:
             assert len(train_inputs) == 2, 'Invalid number of arguments for train input'
             assert sample_prob == 0.0, 'Invalid sample_prob for TRAIN mode. Should be 0.0'
-            enc_dec_inputs, target_len = train_inputs
             assert keep_prob == 0.7, 'Invalid keep_prob, should be 0.7 for training. If you want to set another value change this.'
+            enc_dec_inputs, target_len = train_inputs
         else:
             assert keep_prob == 1.0, 'Invalid keep_prob, should be 1.0 for eval and predict'
             assert sample_prob == 1.0, 'Invalid sample_prob for EVAL mode. Should be 1.0'
@@ -363,18 +362,30 @@ class RVAE(object):
                                        self._hps.dec_layers,
                                        z,
                                        self._hps.keep_prob,
-                                       trunc_norm_init,
                                        mode,
-                                       (emb_tgt_inputs, labels['target_len']))
+                                       trunc_norm_init,
+                                       train_inputs=(emb_tgt_inputs, labels['target_len']))
+            training_logits = tf.identity(logits, name='logits')
+        elif mode == tf.estimator.ModeKeys.EVAL:
+            logits = self._add_decoder(dec_init_state,
+                                       self._hps.hidden_dim,
+                                       self._hps.dec_layers,
+                                       z,
+                                       1.0,
+                                       mode,
+                                       trunc_norm_init,
+                                       sample_prob=1.0,
+                                       train_inputs=(emb_tgt_inputs, labels['target_len']))
             training_logits = tf.identity(logits, name='logits')
         else:
             predicted_ids = self._add_decoder(dec_init_state,
                                               self._hps.hidden_dim,
                                               self._hps.dec_layers,
                                               z,
-                                              self._hps.keep_prob,
+                                              1.0,
+                                              mode,
                                               trunc_norm_init,
-                                              mode)
+                                              sample_prob=1.0)
             inference_logits = tf.transpose(predicted_ids, perm=[2, 0, 1], name='predictions') # shape (beam_size, batch_size, seq_len)
 
         # return the appropriate estimator spec
