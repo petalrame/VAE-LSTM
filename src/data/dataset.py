@@ -141,7 +141,7 @@ class Dataset(object):
                                                                   "target_len": context_parsed["target_len"],
                                                                   "decoder_tgt": sequence_parsed["decoder_tgt"]}
 
-        dataset = tf.data.TFRecordDataset([path]).map(_parse, num_parallel_calls=5).shuffle(buffer_size=2*batch_size+1).repeat(None)
+        dataset = tf.data.TFRecordDataset([path], num_parallel_reads=4).map(_parse, num_parallel_calls=10).shuffle(buffer_size=2*batch_size+1).repeat(None)
 
         padded_shapes = ({"source_seq": tf.TensorShape([None]), # pads to largest sentence in batch
             "source_len": tf.TensorShape([])}, # No padding
@@ -150,6 +150,9 @@ class Dataset(object):
             "decoder_tgt": tf.TensorShape([None])})
 
         dataset = dataset.padded_batch(batch_size, padded_shapes=padded_shapes)
+
+        # enables pipelines
+        dataset = dataset.prefetch(2)
 
         return dataset
 

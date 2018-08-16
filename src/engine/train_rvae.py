@@ -68,8 +68,14 @@ def train_and_eval(model, ds, vocab):
     # get the embedding matrix
     emb_init = vocab.read_embeddings(FLAGS.embed_path)
 
+    # enable mirrored distribution strategy
+    distribute = tf.contrib.distribute.MirroredStrategy(num_gpus=4)
+
     # get config
-    config = tf.estimator.RunConfig(model_dir=FLAGS.model_dir, save_summary_steps=100, session_config=tf.ConfigProto(log_device_placement=True, device_count={'GPU': 0}))
+    config = tf.estimator.RunConfig(model_dir=FLAGS.model_dir,
+                                    save_summary_steps=100,
+                                    train_distribute=distribute,
+                                    session_config=tf.ConfigProto(log_device_placement=True, allow_soft_placement=True, allow_growth=True, per_process_gpu_memory_fraction=0.9, device_count={'GPU': 0}))
 
     # make estimator
     estimator = tf.estimator.Estimator(
