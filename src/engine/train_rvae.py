@@ -23,7 +23,7 @@ tf.app.flags.DEFINE_string('embed_path', '/home/tldr/Projects/models/current/VAE
 tf.app.flags.DEFINE_string('checkpoint_path', '', 'Path to the model checkpoint.')
 
 # Model settings
-tf.app.flags.DEFINE_string('mode', 'train', 'must be one of train/predict/save_embed/debug')
+tf.app.flags.DEFINE_string('mode', 'train', 'must be one of train/predict/save_embed/eval')
 
 # Where to save the outputs of your experiments
 tf.app.flags.DEFINE_string('model_dir', '/home/tldr/Projects/models/current/VAE-LSTM/results/', 'Directory to store all the outputs(logs/checkpoints/etc). Must be provided for eval and predict mode(s)')
@@ -55,12 +55,42 @@ def infer(model, ds, checkpoint_path=None):
     estimator = tf.estimator.Estimator(
         model_fn=model.model_fn,
         model_dir=FLAGS.model_dir,
-        config=config
-    )
+        config=config)
 
     results = estimator.predict(input_fn=lambda:ds.predict_input_fn(path=FLAGS.data_path), checkpoint_path=checkpoint_path)
 
     return results
+
+def eval(model, ds, vocab):
+    """ Runs the eval loop
+    """
+    # get the embedding matrix
+    emb_init = vocab.read_embeddings(FLAGS.embed_path)
+
+    # enable mirrored distribution strategy
+    distribute = tf.contrib.distribute.MirroredStrategy(num_gpus=4)
+
+    # get config
+    if FLAGS.debug:
+        sess_config = tf.ConfigProto(log_device_placement=True, allow_soft_placement=True)
+    else:
+        sess_config = tf.ConfigProto(allow_soft_placement=True)
+    sess_config.gpu_options.allow_growth = True #pylint: disable=E1101
+    sess_config.gpu_options.per_process_gpu_memory_fraction = 0.9 #pylint: disable=E1101
+    config = tf.estimator.RunConfig(model_dir=FLAGS.model_dir,
+                                    save_summary_steps=100,
+                                    train_distribute=distribute,
+                                    session_config=sess_config)
+
+    # make estimator
+    estimator = tf.estimator.Estimator(
+        model_fn=model.model_fn,
+        model_dir=FLAGS.model_dir,
+        config=config,
+        params={'embedding_initializer': emb_init})
+
+    estimator.evaluate(input_fn=lambda:ds.train_input_fn(FLAGS.eval_path, FLAGS.batch_size))
+
 
 def train_and_eval(model, ds, vocab):
     """ Runs train and eval simultaneously
@@ -72,10 +102,16 @@ def train_and_eval(model, ds, vocab):
     distribute = tf.contrib.distribute.MirroredStrategy(num_gpus=4)
 
     # get config
+    if FLAGS.debug:
+        sess_config = tf.ConfigProto(log_device_placement=True, allow_soft_placement=True)
+    else:
+        sess_config = tf.ConfigProto(allow_soft_placement=True)
+    sess_config.gpu_options.allow_growth = True #pylint: disable=E1101
+    sess_config.gpu_options.per_process_gpu_memory_fraction = 0.9 #pylint: disable=E1101
     config = tf.estimator.RunConfig(model_dir=FLAGS.model_dir,
                                     save_summary_steps=100,
                                     train_distribute=distribute,
-                                    session_config=tf.ConfigProto(log_device_placement=True, allow_soft_placement=True, allow_growth=True, per_process_gpu_memory_fraction=0.9, device_count={'GPU': 0}))
+                                    session_config=sess_config)
 
     # make estimator
     estimator = tf.estimator.Estimator(
@@ -90,7 +126,7 @@ def train_and_eval(model, ds, vocab):
 
     # call the train_and_evaluate method
     train_spec = tf.estimator.TrainSpec(input_fn=lambda:ds.train_input_fn(FLAGS.data_path, FLAGS.batch_size), max_steps=FLAGS.train_iterations)
-    eval_spec = tf.estimator.EvalSpec(input_fn=lambda:ds.train_input_fn(FLAGS.data_path, FLAGS.batch_size), exporters=exporter, start_delay_secs=605)
+    eval_spec = tf.estimator.EvalSpec(input_fn=lambda:ds.train_input_fn(FLAGS.eval_path, FLAGS.batch_size), exporters=exporter, start_delay_secs=100, throttle_secs=100)
 
     tf.estimator.train_and_evaluate(estimator, train_spec, eval_spec)
 
@@ -139,6 +175,8 @@ def main(unused_argv):
     elif FLAGS.mode == 'infer':
         predictions = infer(model, ds, FLAGS.checkpoint_path)
         print(predictions)
+    elif FLAGS.mode == 'eval':
+        eval(model, ds, vocab)
     elif FLAGS.mode == 'save_embed':
         _ = vocab.read_embeddings(path=FLAGS.embed_path, load_np=False)
         print("Done saving numpy matrix")

@@ -7,6 +7,10 @@ data/interim/*
 data/processed/*
 data/raw/*
 
+# Exclude results folder contents
+results/*
+!results/.gitkeep
+
 # Don't exclude the READMEs for the data folder
 !data/*/README.md
 
