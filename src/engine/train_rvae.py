@@ -99,7 +99,7 @@ def train_and_eval(model, ds, vocab):
     emb_init = vocab.read_embeddings(FLAGS.embed_path)
 
     # enable mirrored distribution strategy
-    distribute = tf.contrib.distribute.MirroredStrategy(num_gpus=4)
+    #distribute = tf.contrib.distribute.MirroredStrategy(num_gpus=4)
 
     # get config
     if FLAGS.debug:
@@ -110,7 +110,6 @@ def train_and_eval(model, ds, vocab):
     sess_config.gpu_options.per_process_gpu_memory_fraction = 0.9 #pylint: disable=E1101
     config = tf.estimator.RunConfig(model_dir=FLAGS.model_dir,
                                     save_summary_steps=100,
-                                    train_distribute=distribute,
                                     session_config=sess_config)
 
     # make estimator
