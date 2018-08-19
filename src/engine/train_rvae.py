@@ -121,13 +121,52 @@ def train_and_eval(model, ds, vocab):
     )
 
     # make the BestExporter
-    exporter = tf.estimator.BestExporter(name='best_exporter', exports_to_keep=5)
+    exporter = tf.estimator.BestExporter(name='best_exporter', serving_input_receiver_fn=example_serving_input_fn, exports_to_keep=5)
 
     # call the train_and_evaluate method
     train_spec = tf.estimator.TrainSpec(input_fn=lambda:ds.train_input_fn(FLAGS.data_path, FLAGS.batch_size), max_steps=FLAGS.train_iterations)
     eval_spec = tf.estimator.EvalSpec(input_fn=lambda:ds.train_input_fn(FLAGS.eval_path, FLAGS.batch_size), exporters=exporter, start_delay_secs=100, throttle_secs=100)
 
     tf.estimator.train_and_evaluate(estimator, train_spec, eval_spec)
+
+
+def json_serving_input_fn():
+    """ The serving input function. Should work with JSON.
+    """
+    features = {
+        "source_seq": tf.placeholder(shape=[None], dtype=tf.int64),
+        "source_len": tf.placeholder(shape=[None], dtype=tf.int64)
+    }
+    return tf.estimator.export.ServingInputReceiver(features, features)
+
+def example_serving_input_fn():
+    """ The serving input function. Should work with JSON.
+    """
+    # add features
+    context_features = {
+        "source_len": tf.FixedLenFeature([], dtype=tf.int64)
+    }
+    sequence_features = {
+        "source_seq": tf.FixedLenSequenceFeature([], dtype=tf.int64)
+    }
+
+    # placeholder for tf.Example
+    serialized_ex = tf.placeholder(
+        shape=[None],
+        dtype=tf.string
+    )
+
+    # parse features
+    context, sequence = tf.parse_single_sequence_example(
+        serialized=serialized_ex,
+        context_features=context_features,
+        sequence_features=sequence_features
+    )
+
+    receiver = {"examples": serialized_ex}
+    features = {"source_seq": sequence["source_seq"], "source_len": context["source_len"]}
+    
+    return tf.estiamtor.export.ServingInputReceiver(features, receiver)
 
 def main(unused_argv):
     if len(unused_argv) != 1:

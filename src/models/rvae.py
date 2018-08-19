@@ -65,13 +65,13 @@ class RVAE(object):
         Returns:
             next_dec_input: `Tensor` of shape (batch_size, beam_size, emb_dim+latent_dim)
         """
-        print(input)
         emb_word = self._embedding_layer(input) # shape (batch_siz, emb_dim)
 
         if mode != tf.estimator.ModeKeys.TRAIN:
             next_dec_input = tf.concat([emb_word,z],-1)
         else:
-            next_dec_input = tf.concat([emb_word,z],-1)
+            temp = tf.zeros([0,1100]) # used in training to spoof a value for embeddinghelper
+            next_dec_input = tf.concat([emb_word,temp],-1)
 
         return next_dec_input
 
@@ -300,10 +300,7 @@ class RVAE(object):
         """
         # make optimizer
         optimizer = tf.train.AdamOptimizer(lr)
-        print(loss)
-        print(tf.train.get_global_step)
         train_op = optimizer.minimize(loss, global_step=tf.train.get_global_step())
-        print(train_op)
 
         return train_op
 
@@ -331,33 +328,40 @@ class RVAE(object):
         rand_norm_init = tf.random_normal_initializer(stddev=0.001)
         trunc_norm_init = tf.truncated_normal_initializer(stddev=0.0001)
         self._embedding_init = params['embedding_initializer']
-        if mode == tf.estimator.ModeKeys.TRAIN:
+
+        # modify the inputs for training and eval
+        if mode == tf.estimator.ModeKeys.TRAIN and self._hps.use_wdrop:
             # apply word dropout, replacing 0.3 words in decoder input with UNK token
-            if self._hps.use_wdrop:
-                dec_input,_ = tf.map_fn(lambda x: self._word_dropout(x[0], x[1], self._hps.keep_prob), (labels['target_seq'], labels['target_len']))
-                emb_tgt_inputs = self._embedding_layer(dec_input, vis=True)
+            dec_input,_ = tf.map_fn(lambda x: self._word_dropout(x[0], x[1], self._hps.keep_prob), (labels['target_seq'], labels['target_len']))
+            emb_tgt_inputs = self._embedding_layer(dec_input, vis=True)
+            emb_src_inputs = self._embedding_layer(features['source_seq'])
+        elif mode == tf.estimator.ModeKeys.TRAIN and not self._hps.use_wdrop:
+            emb_src_inputs = self._embedding_layer(features['source_seq'], vis=True)
+            emb_tgt_inputs = self._embedding_layer(labels['target_seq'])
         elif mode == tf.estimator.ModeKeys.EVAL:
             emb_tgt_inputs = self._embedding_layer(labels['target_seq'])
-
-        # embed all necessary input tensors and viz if not using wdrop
-        if self._hps.use_wdrop:
             emb_src_inputs = self._embedding_layer(features['source_seq'])
         else:
-            emb_src_inputs = self._embedding_layer(features['source_seq'], vis=True)
+            emb_src_inputs = self._embedding_layer(features['source_seq'])
 
         # pass the embedded tensors to the source encoder
         src_fw_st, src_bw_st = self._add_source_encoder(emb_src_inputs, features['source_len'], self._hps.hidden_dim)
-        src_enc_state = tf.concat([src_fw_st[0], src_bw_st[0]], 1) # shape (batch_size, hidden_dim*2)
-        src_enc_output = tf.concat([src_fw_st[1], src_bw_st[1]], 1) # shape (batch_size, hidden_dim*2)
+            
 
         if mode != tf.estimator.ModeKeys.TRAIN:
+            # make decoder initial state from src encoder when not in training mode
             # transform encoder state shape to (batch_size, hidden_dim)
+            src_enc_state = tf.concat([src_fw_st[0], src_bw_st[0]], 1) # shape (batch_size, hidden_dim*2)
+            src_enc_output = tf.concat([src_fw_st[1], src_bw_st[1]], 1) # shape (batch_size, hidden_dim*2)
             dec_init_state = tf.layers.dense(src_enc_state, self._hps.hidden_dim, kernel_initializer=rand_unif_init)
             dec_init_output = tf.layers.dense(src_enc_output, self._hps.hidden_dim, kernel_initializer=rand_unif_init)
             dec_init = tf.nn.rnn_cell.LSTMStateTuple(dec_init_state, dec_init_output)
 
-        # pass embedded tensors to the target encoder
-        if mode == tf.estimator.ModeKeys.TRAIN:
+            # add the posterior distribution and sample from it
+            q_z = self._make_posterior(src_enc_state, self._hps.latent_dim, rand_norm_init)
+        else:
+            # use target encoder in training mode
+            # pass embedded tensors to the target encoder
             tgt_fw_st, tgt_bw_st = self._add_target_encoder(emb_tgt_inputs, src_fw_st, src_bw_st, labels['target_len'], self._hps.hidden_dim)
             train_enc_state = tf.concat([tgt_fw_st[0], tgt_bw_st[0]], 1) # shape (batch_size, hidden_dim*2)
             train_enc_output = tf.concat([tgt_fw_st[1], tgt_bw_st[1]], 1) # shape (batch_size, hidden_dim*2)
@@ -369,19 +373,17 @@ class RVAE(object):
 
             # calculate posterior with train_enc_state
             q_z = self._make_posterior(train_enc_state, self._hps.latent_dim, rand_norm_init)
-        else:
-            # add the posterior distribution and sample from it
-            q_z = self._make_posterior(src_enc_state, self._hps.latent_dim, rand_norm_init)
+
+        # sample from posterior distribution
         z = q_z.sample() # shape (batch_size, latent_dim)
-        print(z)
 
         # add the prior distribution for loss
         if mode != tf.estimator.ModeKeys.PREDICT:
             p_z = ds.MultivariateNormalDiag(loc=[0.]*self._hps.latent_dim,scale_diag=[1.]*self._hps.latent_dim)
 
         # add the decoder for the given mode
-        tgt_len = tf.cast(labels['target_len'], dtype=tf.int32)
         if mode == tf.estimator.ModeKeys.TRAIN:
+            tgt_len = tf.cast(labels['target_len'], dtype=tf.int32)
             logits = self._add_decoder(dec_init,
                                        self._hps.hidden_dim,
                                        self._hps.dec_layers,
@@ -393,6 +395,7 @@ class RVAE(object):
                                        train_inputs=(emb_tgt_inputs, tgt_len))
             training_logits = tf.identity(logits, name='logits')
         elif mode == tf.estimator.ModeKeys.EVAL:
+            tgt_len = tf.cast(labels['target_len'], dtype=tf.int32)
             logits = self._add_decoder(dec_init,
                                        self._hps.hidden_dim,
                                        self._hps.dec_layers,
