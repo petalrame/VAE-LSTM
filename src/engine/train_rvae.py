@@ -45,41 +45,21 @@ tf.app.flags.DEFINE_boolean('use_wdrop', True, 'Use word dropout as described in
 # Debugging
 tf.app.flags.DEFINE_boolean('debug', False, "Run in tensorflow's debug mode")
 
-def infer(model, ds, checkpoint_path=None):
+def infer(model, ds, vocab, checkpoint_path=None):
     """ Runs a saved model in inference mode
-    """
-    # get config
-    config = tf.estimator.RunConfig(model_dir=FLAGS.model_dir, save_summary_steps=100)
-
-    # make estimator
-    estimator = tf.estimator.Estimator(
-        model_fn=model.model_fn,
-        model_dir=FLAGS.model_dir,
-        config=config)
-
-    results = estimator.predict(input_fn=lambda:ds.predict_input_fn(path=FLAGS.data_path), checkpoint_path=checkpoint_path)
-
-    return results
-
-def eval(model, ds, vocab):
-    """ Runs the eval loop
     """
     # get the embedding matrix
     emb_init = vocab.read_embeddings(FLAGS.embed_path)
 
-    # enable mirrored distribution strategy
-    distribute = tf.contrib.distribute.MirroredStrategy(num_gpus=4)
-
     # get config
     if FLAGS.debug:
-        sess_config = tf.ConfigProto(log_device_placement=True, allow_soft_placement=True)
+        sess_config = tf.ConfigProto(log_device_placement=False, allow_soft_placement=True)
     else:
         sess_config = tf.ConfigProto(allow_soft_placement=True)
     sess_config.gpu_options.allow_growth = True #pylint: disable=E1101
     sess_config.gpu_options.per_process_gpu_memory_fraction = 0.9 #pylint: disable=E1101
     config = tf.estimator.RunConfig(model_dir=FLAGS.model_dir,
                                     save_summary_steps=100,
-                                    train_distribute=distribute,
                                     session_config=sess_config)
 
     # make estimator
@@ -89,7 +69,38 @@ def eval(model, ds, vocab):
         config=config,
         params={'embedding_initializer': emb_init})
 
-    estimator.evaluate(input_fn=lambda:ds.train_input_fn(FLAGS.eval_path, FLAGS.batch_size))
+
+    input_fn = ds.predict_input_fn(path=FLAGS.data_path, batch_size=FLAGS.batch_size)
+    predictions = estimator.predict(input_fn=input_fn, checkpoint_path=checkpoint_path)
+    print(list(predictions))
+
+def eval(model, ds, vocab):
+    """ Runs the eval loop
+    """
+    # get the embedding matrix
+    emb_init = vocab.read_embeddings(FLAGS.embed_path)
+
+    # get config
+    if FLAGS.debug:
+        sess_config = tf.ConfigProto(log_device_placement=False, allow_soft_placement=True)
+    else:
+        sess_config = tf.ConfigProto(allow_soft_placement=True)
+    sess_config.gpu_options.allow_growth = True #pylint: disable=E1101
+    sess_config.gpu_options.per_process_gpu_memory_fraction = 0.9 #pylint: disable=E1101
+    config = tf.estimator.RunConfig(model_dir=FLAGS.model_dir,
+                                    save_summary_steps=100,
+                                    session_config=sess_config)
+
+    # make estimator
+    estimator = tf.estimator.Estimator(
+        model_fn=model.model_fn,
+        model_dir=FLAGS.model_dir,
+        config=config,
+        params={'embedding_initializer': emb_init})
+
+    result = estimator.evaluate(input_fn=lambda:ds.train_input_fn(FLAGS.eval_path, FLAGS.batch_size))
+
+    print(result)
 
 
 def train_and_eval(model, ds, vocab):
@@ -110,6 +121,7 @@ def train_and_eval(model, ds, vocab):
     sess_config.gpu_options.per_process_gpu_memory_fraction = 0.9 #pylint: disable=E1101
     config = tf.estimator.RunConfig(model_dir=FLAGS.model_dir,
                                     save_summary_steps=100,
+                                    save_checkpoints_steps=100,
                                     session_config=sess_config)
 
     # make estimator
@@ -121,52 +133,47 @@ def train_and_eval(model, ds, vocab):
     )
 
     # make the BestExporter
-    exporter = tf.estimator.BestExporter(name='best_exporter', serving_input_receiver_fn=example_serving_input_fn, exports_to_keep=5)
+    spec = {
+        "source_len": tf.FixedLenFeature([], dtype=tf.int64),
+        "source_seq": tf.VarLenFeature(dtype=tf.int64)
+    }
+    serving_input_fn = tf.estimator.export.build_parsing_serving_input_receiver_fn(feature_spec=spec)
+    exporter = tf.estimator.BestExporter(name='best_exporter', serving_input_receiver_fn=serving_input_fn, exports_to_keep=5)
 
     # call the train_and_evaluate method
     train_spec = tf.estimator.TrainSpec(input_fn=lambda:ds.train_input_fn(FLAGS.data_path, FLAGS.batch_size), max_steps=FLAGS.train_iterations)
-    eval_spec = tf.estimator.EvalSpec(input_fn=lambda:ds.train_input_fn(FLAGS.eval_path, FLAGS.batch_size), exporters=exporter, start_delay_secs=100, throttle_secs=100)
+    eval_spec = tf.estimator.EvalSpec(input_fn=lambda:ds.train_input_fn(FLAGS.eval_path, FLAGS.batch_size), exporters=exporter, throttle_secs=100)
 
     tf.estimator.train_and_evaluate(estimator, train_spec, eval_spec)
 
-
-def json_serving_input_fn():
-    """ The serving input function. Should work with JSON.
-    """
-    features = {
-        "source_seq": tf.placeholder(shape=[None], dtype=tf.int64),
-        "source_len": tf.placeholder(shape=[None], dtype=tf.int64)
-    }
-    return tf.estimator.export.ServingInputReceiver(features, features)
-
 def example_serving_input_fn():
-    """ The serving input function. Should work with JSON.
+    """ The serving input function.
     """
     # add features
-    context_features = {
+    ex_context = {
         "source_len": tf.FixedLenFeature([], dtype=tf.int64)
     }
-    sequence_features = {
+    ex_sequence = {
         "source_seq": tf.FixedLenSequenceFeature([], dtype=tf.int64)
     }
 
     # placeholder for tf.Example
     serialized_ex = tf.placeholder(
-        shape=[None],
-        dtype=tf.string
+        shape=[],
+        dtype=tf.string,
+        name="input_tensors"
     )
 
     # parse features
     context, sequence = tf.parse_single_sequence_example(
         serialized=serialized_ex,
-        context_features=context_features,
-        sequence_features=sequence_features
-    )
+        context_features=ex_context,
+        sequence_features=ex_sequence)
 
-    receiver = {"examples": serialized_ex}
+    receiver = {"inputs": serialized_ex}
     features = {"source_seq": sequence["source_seq"], "source_len": context["source_len"]}
     
-    return tf.estiamtor.export.ServingInputReceiver(features, receiver)
+    return tf.estimator.export.ServingInputReceiver(features, receiver)
 
 def main(unused_argv):
     if len(unused_argv) != 1:
@@ -177,6 +184,8 @@ def main(unused_argv):
 
     if FLAGS.mode == 'train':
         assert FLAGS.eval_path is not None, "Error! Eval path must be provided in 'train' mode. Use train_only for only training"
+    elif FLAGS.mode == 'predict':
+        FLAGS.batch_size=1
 
     # change model_dir to model_dir/exp_name and create dir if needed
     FLAGS.model_dir = os.path.join(FLAGS.model_dir, FLAGS.exp_name)
@@ -210,9 +219,8 @@ def main(unused_argv):
 
     if FLAGS.mode == 'train':
         train_and_eval(model, ds, vocab)
-    elif FLAGS.mode == 'infer':
-        predictions = infer(model, ds, FLAGS.checkpoint_path)
-        print(predictions)
+    elif FLAGS.mode == 'predict':
+        infer(model, ds, vocab, FLAGS.checkpoint_path)
     elif FLAGS.mode == 'eval':
         eval(model, ds, vocab)
     elif FLAGS.mode == 'save_embed':

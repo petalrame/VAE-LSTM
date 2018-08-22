@@ -7,6 +7,7 @@ import tensorflow as tf
 from tensorflow import layers
 import tensorflow_probability as tfp
 from tensorflow.contrib.tensorboard.plugins import projector #pylint: disable=E0611
+from tensorflow.contrib.seq2seq.python.ops import beam_search_ops #pylint: disable=E0611
 
 
 ds = tfp.distributions
@@ -32,7 +33,8 @@ class RVAE(object):
             embedding = tf.get_variable('embedding_tensor',
                                         [self._vsize, self._hps.emb_dim],
                                         dtype=tf.float32,
-                                        initializer=self._embedding_init) # initialize with pretrained word vecs
+                                        initializer=self._embedding_init,
+                                        trainable=True) # initialize with pretrained word vecs
             if vis: 
                 self._add_emb_vis(embedding)
             
@@ -60,15 +62,18 @@ class RVAE(object):
     def _embedding_helper(self, input, z, mode):
         """ A helper for beam search decoding during predict mode
         Args:
-            input: A vector `Tensor` of shape (batch_size,) but batch_size should be 1 for predict calls
+            input: A vector `Tensor` of shape (batch_size, beam_size) but batch_size should be 1 for predict calls
             z: `Tensor` of shape (batch_size, latent_dim) used for concatonating output with sample
         Returns:
             next_dec_input: `Tensor` of shape (batch_size, beam_size, emb_dim+latent_dim)
         """
         emb_word = self._embedding_layer(input) # shape (batch_siz, emb_dim)
 
-        if mode != tf.estimator.ModeKeys.TRAIN:
+        if mode == tf.estimator.ModeKeys.EVAL:
             next_dec_input = tf.concat([emb_word,z],-1)
+        elif mode == tf.estimator.ModeKeys.PREDICT:
+            temp = tf.tile(tf.expand_dims(z, 1), [1,self._hps.beam_size,1])
+            next_dec_input = tf.concat([emb_word,temp],-1)
         else:
             temp = tf.zeros([0,1100]) # used in training to spoof a value for embeddinghelper
             next_dec_input = tf.concat([emb_word,temp],-1)
@@ -169,7 +174,7 @@ class RVAE(object):
 
         return posterior
 
-    def _add_decoder(self, enc_state, hidden_dim, num_layers, z, keep_prob, mode, initializer, sample_prob=0.0, train_inputs=None):
+    def _add_decoder(self, enc_state, hidden_dim, num_layers, z, keep_prob, mode, initializer, sample_prob=0.0, impute=True, train_inputs=None):
         """ Creates a decoder to produce outputs 
         Args: 
             enc_state: `Tensor`, Final enc_state after linear layer of shape (batch_size, hidden_dim).
@@ -181,6 +186,7 @@ class RVAE(object):
             mode: `tf.estimator.ModeKeys` specifies the mode and determines what ops to add to the graph
             initializer: Initializer for the projection layer
             sample_prob: `float` probability of sampling from outputs instead of inputs
+            impute: Whether or not to impute finished. Set to False when using beam search
             train_inputs: A tuple of `Tensor`s that specify inputs for the decoder during training. If in prediction mode, this should be None.
             Contains:
               enc_dec_inputs: Inputs for the decoder of shape (batch_size, max_seq_len, emb_dim)
@@ -235,17 +241,16 @@ class RVAE(object):
                                                initial_state=enc_states,
                                                output_layer=projection_layer)
             else:
-                decoder_init_state = seq2seq.tile_batch(enc_state, multiplier=self._hps.beam_size) # shape (batch_size*beam_size,)
                 decoder = seq2seq.BeamSearchDecoder(cell=stacked_cell,
                                                     embedding=lambda x: self._embedding_helper(x, z, mode),
                                                     start_tokens=tf.fill([self._hps.batch_size], 1),
                                                     end_token=2,
-                                                    initial_state=decoder_init_state,
+                                                    initial_state=enc_states,
                                                     beam_width=self._hps.beam_size,
                                                     output_layer=projection_layer)
 
             # unroll the decoder
-            outputs, _, _ = seq2seq.dynamic_decode(decoder, impute_finished=True, maximum_iterations=self._hps.max_dec_steps)
+            outputs, _, _ = seq2seq.dynamic_decode(decoder, impute_finished=impute, maximum_iterations=self._hps.max_dec_steps)
 
         if mode != tf.estimator.ModeKeys.PREDICT:
             return outputs.rnn_output
@@ -342,6 +347,7 @@ class RVAE(object):
             emb_tgt_inputs = self._embedding_layer(labels['target_seq'])
             emb_src_inputs = self._embedding_layer(features['source_seq'])
         else:
+            features["source_seq"] = tf.sparse_tensor_to_dense(features["source_seq"])
             emb_src_inputs = self._embedding_layer(features['source_seq'])
 
         # pass the embedded tensors to the source encoder
@@ -355,7 +361,11 @@ class RVAE(object):
             src_enc_output = tf.concat([src_fw_st[1], src_bw_st[1]], 1) # shape (batch_size, hidden_dim*2)
             dec_init_state = tf.layers.dense(src_enc_state, self._hps.hidden_dim, kernel_initializer=rand_unif_init)
             dec_init_output = tf.layers.dense(src_enc_output, self._hps.hidden_dim, kernel_initializer=rand_unif_init)
-            dec_init = tf.nn.rnn_cell.LSTMStateTuple(dec_init_state, dec_init_output)
+            if mode == tf.estimator.ModeKeys.PREDICT:
+                dec_init = tf.nn.rnn_cell.LSTMStateTuple(seq2seq.tile_batch(dec_init_state, self._hps.beam_size),
+                                                         seq2seq.tile_batch(dec_init_output, self._hps.beam_size))
+            else:
+                dec_init = tf.nn.rnn_cell.LSTMStateTuple(dec_init_state, dec_init_output)
 
             # add the posterior distribution and sample from it
             q_z = self._make_posterior(src_enc_state, self._hps.latent_dim, rand_norm_init)
@@ -413,7 +423,8 @@ class RVAE(object):
                                               z,
                                               1.0,
                                               mode,
-                                              trunc_norm_init)
+                                              trunc_norm_init,
+                                              impute=False)
             inference_logits = tf.transpose(predicted_ids, perm=[2, 0, 1], name='predictions') # shape (beam_size, batch_size, seq_len)
 
         # return the appropriate estimator spec
@@ -434,4 +445,4 @@ class RVAE(object):
             else:
                 return tf.estimator.EstimatorSpec(mode, loss=loss)
         else:
-            return tf.estimator.EstimatorSpec(mode, predictions=inference_logits[0])
+            return tf.estimator.EstimatorSpec(mode, predictions={"pred": inference_logits})

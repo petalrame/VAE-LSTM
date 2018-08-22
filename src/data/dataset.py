@@ -169,24 +169,43 @@ class Dataset(object):
 
         if not os.path.isfile(path):
             raise Exception("Error! The path provided is not a file.")
-        
-        def _parse(ex):
-            """ Parses the input string. Tokenizes and maps to seq of ID
+
+        def _preprocess(ex):
+            """ Preprocesses the input
             """
-            ex = self.vocab.prep_seq(ex)
-            ex_len = len(ex)
-            return ({"source_seq": ex, "source_len": ex_len})
+            parsed = self.vocab.prep_seq(ex)
+            ex_len = len(parsed)
+            return parsed, ex_len
 
-        # create the dataset and map it
-        dataset = tf.data.TextLineDataset([path]).skip(1).map(_parse, num_parallel_calls=5) # there should be a header in the text file
+        # create the dataset and preprocess it.
+        seq_input = []
+        seq_len = []
+        with open(path) as file:
+            lines = file.readlines()
+            for idx, row in enumerate(lines):
+                if idx == 0:
+                    # skip header row 
+                    continue
+                else:
+                    parsed = self.vocab.prep_seq(row)
+                    seq_input.append(parsed)
+                    seq_len.append(len(parsed))
+            assert len(seq_input) == len(seq_len), "Error! seq_input must be the same length as the seq_len"
 
-        # add batching
-        padded_shapes = ({"source_seq": tf.TensorShape([None]), # pads to largest sentence in batch
-        "source_len": tf.TensorShape([])})
+        # pad the data
+        max_len = max(seq_len)
+        for idx, _ in enumerate(seq_input):
+            seq_input[idx].extend([0]*(max_len-seq_len[idx]))
 
-        dataset = dataset.padded_batch(batch_size, padded_shapes=padded_shapes) 
+        # preprocess data
+        seq_input = np.array([np.asarray(x, dtype=np.int64) for x in seq_input])
+        seq_len = np.array([np.asarray(x, dtype=np.int64) for x in seq_len])
 
-        return dataset
+        return tf.estimator.inputs.numpy_input_fn(
+            x={"source_seq": seq_input, "source_len": seq_len},
+            batch_size=batch_size,
+            shuffle=False
+        )
 
 
 
