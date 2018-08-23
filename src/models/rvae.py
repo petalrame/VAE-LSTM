@@ -67,7 +67,12 @@ class RVAE(object):
         Returns:
             next_dec_input: `Tensor` of shape (batch_size, beam_size, emb_dim+latent_dim)
         """
-        emb_word = self._embedding_layer(input) # shape (batch_siz, emb_dim)
+        if tf.get_variable_scope().name == 'decoder':
+            # this is a hack to prevent a checkpoint not found error during prediction mode
+            with tf.variable_scope('decoder'):
+                emb_word = self._embedding_layer(input)
+        else:
+            emb_word = self._embedding_layer(input)
 
         if mode == tf.estimator.ModeKeys.EVAL:
             next_dec_input = tf.concat([emb_word,z],-1)
@@ -212,7 +217,7 @@ class RVAE(object):
             assert len(train_inputs) == 2, 'Invalid number of arguments for train input'
             enc_dec_inputs, target_len = train_inputs
 
-        with tf.variable_scope('decoder'):
+        with tf.variable_scope('decoder', reuse=tf.AUTO_REUSE):
             # basic stacked RNN of 2 layers
             dec_cells = [tf.nn.rnn_cell.LSTMCell(hidden_dim, state_is_tuple=True) for _ in range(num_layers)]
             enc_states = tuple([enc_state for _ in range(num_layers)])
@@ -250,7 +255,7 @@ class RVAE(object):
                                                     output_layer=projection_layer)
 
             # unroll the decoder
-            outputs, _, _ = seq2seq.dynamic_decode(decoder, impute_finished=impute, maximum_iterations=self._hps.max_dec_steps)
+            outputs, _, _ = seq2seq.dynamic_decode(decoder, impute_finished=impute, maximum_iterations=self._hps.max_dec_steps, scope='decoder')
 
         if mode != tf.estimator.ModeKeys.PREDICT:
             return outputs.rnn_output
@@ -347,7 +352,8 @@ class RVAE(object):
             emb_tgt_inputs = self._embedding_layer(labels['target_seq'])
             emb_src_inputs = self._embedding_layer(features['source_seq'])
         else:
-            features["source_seq"] = tf.sparse_tensor_to_dense(features["source_seq"])
+            if isinstance(features["source_seq"], tf.SparseTensor):
+                features["source_seq"] = tf.sparse_tensor_to_dense(features["source_seq"])
             emb_src_inputs = self._embedding_layer(features['source_seq'])
 
         # pass the embedded tensors to the source encoder
@@ -445,4 +451,4 @@ class RVAE(object):
             else:
                 return tf.estimator.EstimatorSpec(mode, loss=loss)
         else:
-            return tf.estimator.EstimatorSpec(mode, predictions={"pred": inference_logits})
+            return tf.estimator.EstimatorSpec(mode, predictions={"pred": inference_logits[0]})

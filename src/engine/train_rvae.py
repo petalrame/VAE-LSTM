@@ -72,7 +72,8 @@ def infer(model, ds, vocab, checkpoint_path=None):
 
     input_fn = ds.predict_input_fn(path=FLAGS.data_path, batch_size=FLAGS.batch_size)
     predictions = estimator.predict(input_fn=input_fn, checkpoint_path=checkpoint_path)
-    print(list(predictions))
+    
+    return list(predictions)
 
 def eval(model, ds, vocab):
     """ Runs the eval loop
@@ -220,7 +221,8 @@ def main(unused_argv):
     if FLAGS.mode == 'train':
         train_and_eval(model, ds, vocab)
     elif FLAGS.mode == 'predict':
-        infer(model, ds, vocab, FLAGS.checkpoint_path)
+        predictions = infer(model, ds, vocab, FLAGS.checkpoint_path)
+        print(predictions)
     elif FLAGS.mode == 'eval':
         eval(model, ds, vocab)
     elif FLAGS.mode == 'save_embed':
