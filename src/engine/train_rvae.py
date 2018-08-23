@@ -110,8 +110,8 @@ def train_and_eval(model, ds, vocab):
     # get the embedding matrix
     emb_init = vocab.read_embeddings(FLAGS.embed_path)
 
-    # enable mirrored distribution strategy
-    #distribute = tf.contrib.distribute.MirroredStrategy(num_gpus=4)
+    # TODO: enable mirrored distribution strategy
+    #distribute = tf.contrib.distribute.MirroredStrategy()
 
     # get config
     if FLAGS.debug:
@@ -143,7 +143,7 @@ def train_and_eval(model, ds, vocab):
 
     # call the train_and_evaluate method
     train_spec = tf.estimator.TrainSpec(input_fn=lambda:ds.train_input_fn(FLAGS.data_path, FLAGS.batch_size), max_steps=FLAGS.train_iterations)
-    eval_spec = tf.estimator.EvalSpec(input_fn=lambda:ds.train_input_fn(FLAGS.eval_path, FLAGS.batch_size), exporters=exporter, throttle_secs=100)
+    eval_spec = tf.estimator.EvalSpec(input_fn=lambda:ds.train_input_fn(FLAGS.eval_path, FLAGS.batch_size), exporters=exporter, start_delay_secs=0, throttle_secs=0)
 
     tf.estimator.train_and_evaluate(estimator, train_spec, eval_spec)
 

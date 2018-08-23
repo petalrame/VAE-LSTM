@@ -358,21 +358,21 @@ class RVAE(object):
 
         # pass the embedded tensors to the source encoder
         src_fw_st, src_bw_st = self._add_source_encoder(emb_src_inputs, features['source_len'], self._hps.hidden_dim)
+
+        # make decoder initial state from src encoder
+        # transform encoder state shape to (batch_size, hidden_dim)
+        src_enc_state = tf.concat([src_fw_st[0], src_bw_st[0]], 1) # shape (batch_size, hidden_dim*2)
+        src_enc_output = tf.concat([src_fw_st[1], src_bw_st[1]], 1) # shape (batch_size, hidden_dim*2)
+        dec_init_state = tf.layers.dense(src_enc_state, self._hps.hidden_dim, kernel_initializer=rand_unif_init)
+        dec_init_output = tf.layers.dense(src_enc_output, self._hps.hidden_dim, kernel_initializer=rand_unif_init)
+        if mode == tf.estimator.ModeKeys.PREDICT:
+            dec_init = tf.nn.rnn_cell.LSTMStateTuple(seq2seq.tile_batch(dec_init_state, self._hps.beam_size),
+                                                        seq2seq.tile_batch(dec_init_output, self._hps.beam_size))
+        else:
+            dec_init = tf.nn.rnn_cell.LSTMStateTuple(dec_init_state, dec_init_output)
             
-
+        # adds target encoder(only in train mode) and posterior distribution
         if mode != tf.estimator.ModeKeys.TRAIN:
-            # make decoder initial state from src encoder when not in training mode
-            # transform encoder state shape to (batch_size, hidden_dim)
-            src_enc_state = tf.concat([src_fw_st[0], src_bw_st[0]], 1) # shape (batch_size, hidden_dim*2)
-            src_enc_output = tf.concat([src_fw_st[1], src_bw_st[1]], 1) # shape (batch_size, hidden_dim*2)
-            dec_init_state = tf.layers.dense(src_enc_state, self._hps.hidden_dim, kernel_initializer=rand_unif_init)
-            dec_init_output = tf.layers.dense(src_enc_output, self._hps.hidden_dim, kernel_initializer=rand_unif_init)
-            if mode == tf.estimator.ModeKeys.PREDICT:
-                dec_init = tf.nn.rnn_cell.LSTMStateTuple(seq2seq.tile_batch(dec_init_state, self._hps.beam_size),
-                                                         seq2seq.tile_batch(dec_init_output, self._hps.beam_size))
-            else:
-                dec_init = tf.nn.rnn_cell.LSTMStateTuple(dec_init_state, dec_init_output)
-
             # add the posterior distribution and sample from it
             q_z = self._make_posterior(src_enc_state, self._hps.latent_dim, rand_norm_init)
         else:
@@ -380,12 +380,6 @@ class RVAE(object):
             # pass embedded tensors to the target encoder
             tgt_fw_st, tgt_bw_st = self._add_target_encoder(emb_tgt_inputs, src_fw_st, src_bw_st, labels['target_len'], self._hps.hidden_dim)
             train_enc_state = tf.concat([tgt_fw_st[0], tgt_bw_st[0]], 1) # shape (batch_size, hidden_dim*2)
-            train_enc_output = tf.concat([tgt_fw_st[1], tgt_bw_st[1]], 1) # shape (batch_size, hidden_dim*2)
-
-            # transform encoder state shape to (batch_size, hidden_dim)
-            dec_init_state = tf.layers.dense(train_enc_state, self._hps.hidden_dim, kernel_initializer=rand_unif_init)
-            dec_init_output = tf.layers.dense(train_enc_output, self._hps.hidden_dim, kernel_initializer=rand_unif_init)
-            dec_init = tf.nn.rnn_cell.LSTMStateTuple(dec_init_state, dec_init_output)
 
             # calculate posterior with train_enc_state
             q_z = self._make_posterior(train_enc_state, self._hps.latent_dim, rand_norm_init)
