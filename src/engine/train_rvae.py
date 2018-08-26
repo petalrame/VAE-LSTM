@@ -72,6 +72,11 @@ def infer(model, ds, vocab, checkpoint_path=None):
 
     input_fn = ds.predict_input_fn(path=FLAGS.data_path, batch_size=FLAGS.batch_size)
     predictions = estimator.predict(input_fn=input_fn, checkpoint_path=checkpoint_path)
+
+    vocab.make_reverse_vocab()
+
+    for ex in predictions:
+        print(vocab.ids_to_text(ex['pred']))
     
     return list(predictions)
 

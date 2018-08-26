@@ -29,6 +29,8 @@ class RVAE(object):
         Returns:
             emb_tensor: `Tensor` of size (batch_size, max_seq_len, emb_dim)
         """
+        # TODO: Is the variable scope even necessary? Desired effect is having this embedding
+        # variable available in any scope. So this should be a global tensor.
         with tf.variable_scope('embedding_layer', reuse=tf.AUTO_REUSE):
             embedding = tf.get_variable('embedding_tensor',
                                         [self._vsize, self._hps.emb_dim],
@@ -338,6 +340,8 @@ class RVAE(object):
         rand_norm_init = tf.random_normal_initializer(stddev=0.001)
         trunc_norm_init = tf.truncated_normal_initializer(stddev=0.0001)
         self._embedding_init = params['embedding_initializer']
+
+        # TODO: Add feature columns to maybe get rid of uninitialized variables
 
         # modify the inputs for training and eval
         if mode == tf.estimator.ModeKeys.TRAIN and self._hps.use_wdrop:
