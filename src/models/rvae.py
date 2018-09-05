@@ -343,12 +343,13 @@ class RVAE(object):
 
         # TODO: Add feature columns to maybe get rid of uninitialized variables
 
+
         # modify the inputs for training and eval
         if mode == tf.estimator.ModeKeys.TRAIN and self._hps.use_wdrop:
             # apply word dropout, replacing 0.3 words in decoder input with UNK token
             dec_input,_ = tf.map_fn(lambda x: self._word_dropout(x[0], x[1], self._hps.keep_prob), (labels['target_seq'], labels['target_len']))
-            emb_tgt_inputs = self._embedding_layer(dec_input, vis=True)
-            emb_src_inputs = self._embedding_layer(features['source_seq'])
+            emb_src_inputs = self._embedding_layer(features['source_seq'], vis=True)
+            emb_tgt_inputs = self._embedding_layer(dec_input)
         elif mode == tf.estimator.ModeKeys.TRAIN and not self._hps.use_wdrop:
             emb_src_inputs = self._embedding_layer(features['source_seq'], vis=True)
             emb_tgt_inputs = self._embedding_layer(labels['target_seq'])

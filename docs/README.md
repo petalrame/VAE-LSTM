@@ -24,8 +24,8 @@ This doc is for notating the progress on the project as well as providing an ove
 
 - [x] Build input functions to feed the Estimator API
 - [x] Write tests for the data pipeline
-- [ ] Write the model code for RVAE
-- [ ] Add options in graph building for inference mode
-- [ ] Finish writing logs for Tensorboard
-- [ ] Write training, eval and inference functions for the Estimator API
+- [x] Write the model code for RVAE
+- [x] Add options in graph building for inference mode
+- [-] Finish writing logs for Tensorboard
+- [x] Write training, eval and inference functions for the Estimator API
 - [ ] Write evaluation scripts(BLEU)
