@@ -31,7 +31,7 @@ class RVAE(object):
         embedding = tf.get_variable('embedding_tensor',
                                     [self._vsize, self._hps.emb_dim],
                                     dtype=tf.float32,
-                                    trainable=True) # initialize with pretrained word vecs
+                                    trainable=True) # initialized with pretrained word vecs with scaffold
         if vis: 
             self._add_emb_vis(self._embedding)
             
