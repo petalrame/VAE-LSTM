@@ -28,12 +28,9 @@ class RVAE(object):
         Returns:
             emb_tensor: `Tensor` of size (batch_size, max_seq_len, emb_dim)
         """
-        # TODO: Is the variable scope even necessary? Desired effect is having this embedding
-        # variable available in any scope. So this should be a global tensor. F A C T S
         embedding = tf.get_variable('embedding_tensor',
                                     [self._vsize, self._hps.emb_dim],
                                     dtype=tf.float32,
-                                    initializer=self._embedding_init,
                                     trainable=True) # initialize with pretrained word vecs
         if vis: 
             self._add_emb_vis(self._embedding)
@@ -337,7 +334,6 @@ class RVAE(object):
         rand_unif_init = tf.random_uniform_initializer(-1.0, 1.0, seed=123)
         rand_norm_init = tf.random_normal_initializer(stddev=0.001)
         trunc_norm_init = tf.truncated_normal_initializer(stddev=0.0001)
-        self._embedding_init = params['embedding_initializer']
 
         # TODO: Add feature columns to maybe get rid of uninitialized variables
 
@@ -447,7 +443,14 @@ class RVAE(object):
             # finish returning the estimator specs for train and eval
             if mode == tf.estimator.ModeKeys.TRAIN:
                 train_op = self._train_op(loss, self._hps.lr)
-                return tf.estimator.EstimatorSpec(mode, loss=loss, train_op=train_op)
+
+                # initialize embedding variables
+                def init_fn(scaffold, sess):
+                    return sess.run(self._embedding.initializer, params['embedding_initializer'])
+
+                scaffold = tf.train.Scaffold(init_fn=init_fn)
+
+                return tf.estimator.EstimatorSpec(mode, loss=loss, train_op=train_op, scaffold=scaffold)
             else:
                 return tf.estimator.EstimatorSpec(mode, loss=loss)
         else:

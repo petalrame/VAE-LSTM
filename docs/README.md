@@ -28,6 +28,7 @@ This doc is for notating the progress on the project as well as providing an ove
 - [x] Add options in graph building for inference mode
 - [-] Finish writing logs for Tensorboard
 - [x] Write training, eval and inference functions for the Estimator API
-- [ ] Remove embedding scope for the embedding tensor. As a direct consequence, check created variables and make sure decoder layer does not get it's own emebedding tensor
+- [x] Remove embedding scope for the embedding tensor. As a direct consequence, check created variables and make sure decoder layer does not get it's own emebedding tensor
 - [ ] Pass in feature_cols as params?
+- [x] Use tf.train.Scaffold's init_fn for embedding variable initialization
 - [ ] Write evaluation scripts(BLEU)
