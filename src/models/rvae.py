@@ -21,26 +21,24 @@ class RVAE(object):
         self._hps = hps # contains all hps for the model
         self._vsize = vocab_size
 
-    def _embedding_layer(self, input, vis=False):
+    def _embedding_layer(self, vis=False):
         """ Adds the embedding layer that is used for the encoder and decoder inputs
         Args:
-            input: `Tensor` of shape (batch_size, max_seq_len)
             vis: `Boolean` that tells this layer whether or not to create the projector config for Tensorboard
         Returns:
             emb_tensor: `Tensor` of size (batch_size, max_seq_len, emb_dim)
         """
         # TODO: Is the variable scope even necessary? Desired effect is having this embedding
-        # variable available in any scope. So this should be a global tensor.
-        with tf.variable_scope('embedding_layer', reuse=tf.AUTO_REUSE):
-            embedding = tf.get_variable('embedding_tensor',
-                                        [self._vsize, self._hps.emb_dim],
-                                        dtype=tf.float32,
-                                        initializer=self._embedding_init,
-                                        trainable=True) # initialize with pretrained word vecs
-            if vis: 
-                self._add_emb_vis(embedding)
+        # variable available in any scope. So this should be a global tensor. F A C T S
+        embedding = tf.get_variable('embedding_tensor',
+                                    [self._vsize, self._hps.emb_dim],
+                                    dtype=tf.float32,
+                                    initializer=self._embedding_init,
+                                    trainable=True) # initialize with pretrained word vecs
+        if vis: 
+            self._add_emb_vis(self._embedding)
             
-        return tf.nn.embedding_lookup(embedding, input)
+        return embedding
 
     def _add_emb_vis(self, embedding_var):
         """ Do some setup so that we can view word embeddings in Tensorboard, as described here:
@@ -72,9 +70,9 @@ class RVAE(object):
         if tf.get_variable_scope().name == 'decoder':
             # this is a hack to prevent a checkpoint not found error during prediction mode
             with tf.variable_scope('decoder'):
-                emb_word = self._embedding_layer(input)
+                emb_word = tf.nn.embedding_lookup(self._embedding, input)
         else:
-            emb_word = self._embedding_layer(input)
+            emb_word = tf.nn.embedding_lookup(self._embedding, input)
 
         if mode == tf.estimator.ModeKeys.EVAL:
             next_dec_input = tf.concat([emb_word,z],-1)
@@ -343,23 +341,26 @@ class RVAE(object):
 
         # TODO: Add feature columns to maybe get rid of uninitialized variables
 
+        # get the embedding tensor and visualize if trainin
+        if mode == tf.estimator.ModeKeys.TRAIN:
+            self._embedding = self._embedding_layer(vis=True)
+        else:
+            self._embedding = self._embedding_layer()
 
-        # modify the inputs for training and eval
+        # embed source sequence
+        if mode == tf.estimator.ModeKeys.PREDICT and if isinstance(features["source_seq"], tf.SparseTensor):
+            features["source_seq"] = tf.sparse_tensor_to_dense(features["source_seq"])
+        emb_src_inputs = tf.nn.embedding_lookup(self._embedding, features['source_seq'])
+
+        # modify and embed the target sequence
         if mode == tf.estimator.ModeKeys.TRAIN and self._hps.use_wdrop:
             # apply word dropout, replacing 0.3 words in decoder input with UNK token
             dec_input,_ = tf.map_fn(lambda x: self._word_dropout(x[0], x[1], self._hps.keep_prob), (labels['target_seq'], labels['target_len']))
-            emb_src_inputs = self._embedding_layer(features['source_seq'], vis=True)
-            emb_tgt_inputs = self._embedding_layer(dec_input)
+            emb_tgt_inputs = tf.nn.embedding_lookup(self._embedding, dec_input)
         elif mode == tf.estimator.ModeKeys.TRAIN and not self._hps.use_wdrop:
-            emb_src_inputs = self._embedding_layer(features['source_seq'], vis=True)
-            emb_tgt_inputs = self._embedding_layer(labels['target_seq'])
+            emb_tgt_inputs = tf.nn.embedding_lookup(self._embedding, labels['target_seq'])
         elif mode == tf.estimator.ModeKeys.EVAL:
-            emb_tgt_inputs = self._embedding_layer(labels['target_seq'])
-            emb_src_inputs = self._embedding_layer(features['source_seq'])
-        else:
-            if isinstance(features["source_seq"], tf.SparseTensor):
-                features["source_seq"] = tf.sparse_tensor_to_dense(features["source_seq"])
-            emb_src_inputs = self._embedding_layer(features['source_seq'])
+            emb_tgt_inputs = tf.nn.embedding_lookup(self._embedding, labels['target_seq'])
 
         # pass the embedded tensors to the source encoder
         src_fw_st, src_bw_st = self._add_source_encoder(emb_src_inputs, features['source_len'], self._hps.hidden_dim)
