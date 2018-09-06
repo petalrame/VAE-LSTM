@@ -446,7 +446,7 @@ class RVAE(object):
 
                 # initialize embedding variables
                 def init_fn(scaffold, sess):
-                    return sess.run(self._embedding.initializer, params['embedding_initializer'])
+                    return sess.run(self._embedding.initializer, {self._embedding.initial_value: params['embedding_initializer']})
 
                 scaffold = tf.train.Scaffold(init_fn=init_fn)
 
