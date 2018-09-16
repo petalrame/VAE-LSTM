@@ -1,0 +1,24 @@
+default: &DEFUALT
+  data_path: /home/tldr/Projects/models/current/VAE-LSTM/data/processed/train.tfrecord
+  eval_path: /home/tldr/Projects/models/current/VAE-LSTM/data/processed/val.tfrecord
+  vocab_path: /home/tldr/Projects/models/current/VAE-LSTM/data/processed/vocab.tsv
+  embed_path: /home/tldr/Projects/models/current/VAE-LSTM/data/external/crawl-300d-2M.vec
+  model_dir: /home/tldr/Projects/models/current/VAE-LSTM/results/
+  train_iterations: 600000
+  batch_size: 32
+  emb_dim: 300
+  hidden_dim: 600
+  latent_dim: 1100
+  dec_layers: 2
+  beam_size: 10
+  max_dec_steps: 200
+  lr: 0.00005
+  keep_prob: 0.7
+  use_wdrop: True
+  debug: False
+
+without_wdrop:
+  <<: *DEFUALT
+  use_wdrop: False
+
+
