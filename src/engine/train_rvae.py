@@ -226,6 +226,7 @@ def main(unused_argv):
                 hps_dict[key] = FLAGS[key].value
         hps = namedtuple("HParams", hps_dict.keys())(**hps_dict)
     else:
+        # TODO: Fix the yaml file location to use relative pathing so that we can find the config files
         FLAGS = AppConfig('app.yaml', 'default')
         hps = ModelParams('hps.yaml', 'default')
 
