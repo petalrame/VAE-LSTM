@@ -12,8 +12,13 @@ sys.path.append('../')
 from src.data.dataset import Dataset
 from src.data.vocab import Vocab
 from src.models.rvae import RVAE
+from src.utils.load_config import ModelParams, AppConfig
 
 FLAGS = tf.app.flags.FLAGS
+
+# Use config files insetad of tensorflow app flags
+tf.app.flags.DEFINE_string('app_config', ''. 'profile for the app configuration')
+tf.app.flags.DEFINE_string('model_params', ''. 'profile for the model hyperparameters')
 
 # Where to find data
 tf.app.flags.DEFINE_string('data_path', '/home/tldr/Projects/models/current/VAE-LSTM/data/processed/train.tfrecord', 'Path to the tf.Record data files or text file if predicting.')
@@ -213,12 +218,16 @@ def main(unused_argv):
     ds = Dataset(vocab)
 
     # create an hps list
-    hp_list = ['batch_size', 'emb_dim', 'hidden_dim', 'latent_dim', 'dec_layers', 'beam_size', 'max_dec_steps', 'lr', 'keep_prob', 'use_wdrop', 'model_dir', 'vocab_path']
-    hps_dict = {}
-    for key in FLAGS:
-        if key in hp_list:
-            hps_dict[key] = FLAGS[key].value
-    hps = namedtuple("HParams", hps_dict.keys())(**hps_dict)
+    if not FLAGS.app_config or not FLAGS.model_params:
+        hp_list = ['batch_size', 'emb_dim', 'hidden_dim', 'latent_dim', 'dec_layers', 'beam_size', 'max_dec_steps', 'lr', 'keep_prob', 'use_wdrop', 'model_dir', 'vocab_path']
+        hps_dict = {}
+        for key in FLAGS:
+            if key in hp_list:
+                hps_dict[key] = FLAGS[key].value
+        hps = namedtuple("HParams", hps_dict.keys())(**hps_dict)
+    else:
+        FLAGS = AppConfig('app.yaml', 'default')
+        hps = ModelParams('hps.yaml', 'default')
 
     # call the model
     model = RVAE(hps, vsize)

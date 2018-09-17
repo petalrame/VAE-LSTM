@@ -1,4 +1,4 @@
-hyperparams: &DEFAULT
+default: &DEFAULT
   train_iterations: 600000
   batch_size: 32
   emb_dim: 300

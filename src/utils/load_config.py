@@ -14,4 +14,4 @@ class ModelParams(YParams):
 class AppConfig(YParams):
     def __init__(self, yaml_fn, config_name):
         super().__init__(yaml_fn, config_name)
-        self.model_parameter = ModelParams(self.parameter_file,   self.parameter_profile)
+        self.model_parameter = ModelParams(self.parameter_file, self.parameter_profile)

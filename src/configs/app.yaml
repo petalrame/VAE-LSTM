@@ -1,9 +1,20 @@
-local: &DEFUALT
+default: &DEFUALT
   data_path: /home/tldr/Projects/models/current/VAE-LSTM/data/processed/train.tfrecord
   eval_path: /home/tldr/Projects/models/current/VAE-LSTM/data/processed/val.tfrecord
   vocab_path: /home/tldr/Projects/models/current/VAE-LSTM/data/processed/vocab.tsv
   embed_path: /home/tldr/Projects/models/current/VAE-LSTM/data/external/crawl-300d-2M.vec
+  checkpoint_path: 
   model_dir: /home/tldr/Projects/models/current/VAE-LSTM/results/
+  exp_name: test
+  mode: train
   debug: False
+
+save_embed:
+  <<: *DEFUALT
+  mode: save_embed
+
+debug:
+  <<: *DEFUALT
+  debug: True
 
 
