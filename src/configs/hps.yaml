@@ -1,0 +1,16 @@
+hyperparams: &DEFAULT
+  train_iterations: 600000
+  batch_size: 32
+  emb_dim: 300
+  hidden_dim: 600
+  latent_dim: 1100
+  dec_layers: 2
+  beam_size: 10
+  max_dec_steps: 200
+  lr: 0.00005
+  keep_prob: 0.7
+  use_wdrop: True
+
+no_wdrop:
+  <<: *DEFAULT
+  use_wdrop: False
