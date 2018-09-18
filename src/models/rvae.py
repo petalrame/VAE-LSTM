@@ -33,7 +33,7 @@ class RVAE(object):
                                     dtype=tf.float32,
                                     trainable=True) # initialized with pretrained word vecs with scaffold
         if vis: 
-            self._add_emb_vis(self._embedding)
+            self._add_emb_vis(embedding)
             
         return embedding
 
@@ -344,7 +344,7 @@ class RVAE(object):
             self._embedding = self._embedding_layer()
 
         # embed source sequence
-        if mode == tf.estimator.ModeKeys.PREDICT and if isinstance(features["source_seq"], tf.SparseTensor):
+        if mode == tf.estimator.ModeKeys.PREDICT and isinstance(features["source_seq"], tf.SparseTensor):
             features["source_seq"] = tf.sparse_tensor_to_dense(features["source_seq"])
         emb_src_inputs = tf.nn.embedding_lookup(self._embedding, features['source_seq'])
 

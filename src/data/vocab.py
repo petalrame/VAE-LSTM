@@ -120,10 +120,11 @@ class Vocab(object):
         
         return text
 
-    def read_embeddings(self, path, load_np=True):
+    def read_embeddings(self, path, use_init=False, load_np=True):
         """ Reads word embeddings from file that are saved in the FastText format
         Args:
             path: Path to the embedding file
+            use_init: Return the init function, instead of the np array
             load_np: Load np array
         Returns:
             embedding_initializer: An initializer for pre-trained embeddings
@@ -140,7 +141,10 @@ class Vocab(object):
 
         if load_np:
             embedding_matrix = np.load("/home/tldr/Projects/models/current/VAE-LSTM/data/external/emb_matrix.npy")
-            return embed_initializer
+            if use_init:
+                return embed_initializer
+            else:
+                return embedding_matrix
 
         fin = io.open(path, 'r', encoding='utf-8', newline='\n', errors='ignore')
         _, dim = map(int, fin.readline().split())

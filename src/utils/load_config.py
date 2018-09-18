@@ -1,5 +1,5 @@
-import ruamel_yaml import YAML
-import tensorflow.contrib.training import HParams
+from ruamel.yaml import YAML
+from tensorflow.contrib.training import HParams
 
 class YParams(HParams):
     def __init__(self, yaml_fn, config_name):

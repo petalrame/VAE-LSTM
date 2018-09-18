@@ -17,8 +17,8 @@ from src.utils.load_config import ModelParams, AppConfig
 FLAGS = tf.app.flags.FLAGS
 
 # Use config files insetad of tensorflow app flags
-tf.app.flags.DEFINE_string('app_config', ''. 'profile for the app configuration')
-tf.app.flags.DEFINE_string('model_params', ''. 'profile for the model hyperparameters')
+tf.app.flags.DEFINE_string('app_config', '', 'profile for the app configuration')
+tf.app.flags.DEFINE_string('model_params', '', 'profile for the model hyperparameters')
 
 # Where to find data
 tf.app.flags.DEFINE_string('data_path', '/home/tldr/Projects/models/current/VAE-LSTM/data/processed/train.tfrecord', 'Path to the tf.Record data files or text file if predicting.')
@@ -45,7 +45,7 @@ tf.app.flags.DEFINE_integer('beam_size', 10, 'beam size for beam search decoding
 tf.app.flags.DEFINE_integer('max_dec_steps', 200, 'max time steps allowed for decoding')
 tf.app.flags.DEFINE_float('lr', 0.00005, 'the learning rate')
 tf.app.flags.DEFINE_float('keep_prob', 0.7, '1 - dropout rate')
-tf.app.flags.DEFINE_boolean('use_wdrop', True, 'Use word dropout as described in arxiv 1511.06349')
+tf.app.flags.DEFINE_boolean('use_wdrop', False, 'Use word dropout as described in arxiv 1511.06349')
 
 # Debugging
 tf.app.flags.DEFINE_boolean('debug', False, "Run in tensorflow's debug mode")
@@ -227,7 +227,7 @@ def main(unused_argv):
         hps = namedtuple("HParams", hps_dict.keys())(**hps_dict)
     else:
         # TODO: Fix the yaml file location to use relative pathing so that we can find the config files
-        FLAGS = AppConfig('app.yaml', 'default')
+        flags = AppConfig('app.yaml', 'default')
         hps = ModelParams('hps.yaml', 'default')
 
     # call the model
